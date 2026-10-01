@@ -2579,11 +2579,22 @@
                 0;
 
 
+            /* [FIX] 出口節點（無 outgoing pipe）視為平衡 */
+            const isOutfall =
+                !node.outgoingPipes ||
+                node.outgoingPipes.length === 0;
+
+            const effectiveOutflow =
+                isOutfall
+                    ? node.inflow +
+                      Math.max(0, external)
+                    : node.outflow;
+
             const balance =
-                hasExternal
+                hasExternal || isOutfall
                     ? node.inflow +
                       external -
-                      node.outflow
+                      effectiveOutflow
                     : node.net;
 
 
@@ -2598,7 +2609,7 @@
                         )
                     ),
                     Math.abs(
-                        node.outflow
+                        effectiveOutflow
                     ),
                     1e-12
                 );
@@ -2641,7 +2652,7 @@
                     external,
 
                 outflow:
-                    node.outflow,
+                    effectiveOutflow,
 
                 balance,
 
