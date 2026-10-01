@@ -3,6 +3,19 @@
 <head>
     <meta charset="UTF-8">
 
+    <script>
+        /* 未登入前先鎖定畫面，避免內容閃現 */
+        (function () {
+            try {
+                if (sessionStorage.getItem("v3_auth_ok") !== "1") {
+                    document.documentElement.classList.add("v3-locked");
+                }
+            } catch (e) {
+                document.documentElement.classList.add("v3-locked");
+            }
+        })();
+    </script>
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0"
@@ -933,11 +946,103 @@
             body { background: white; }
         }
 
+
+        /* =====================================================
+           Login gate + visit counter
+           ===================================================== */
+
+        .v3-locked header,
+        .v3-locked main,
+        .v3-locked footer {
+            display: none !important;
+        }
+
+        #v3Gate {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #0b3954, #087e8b);
+        }
+
+        .v3-locked #v3Gate {
+            display: flex;
+        }
+
+        .gate-box {
+            width: min(400px, 100%);
+            background: white;
+            border-radius: 12px;
+            padding: 28px 26px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .gate-box h1 {
+            margin: 0 0 4px;
+            font-size: 20px;
+            color: #0b3954;
+        }
+
+        .gate-box p {
+            margin: 0 0 18px;
+            font-size: 13px;
+            color: #607d8b;
+        }
+
+        .gate-msg {
+            min-height: 22px;
+            margin: 8px 0 4px;
+            font-size: 13px;
+            color: #d62828;
+        }
+
+        .gate-box .btn {
+            width: 100%;
+            margin: 6px 0 0;
+        }
+
+        .gate-box .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .visit-counter {
+            margin-top: 6px;
+            font-size: 14px;
+        }
+
+        .visit-counter strong {
+            font-size: 16px;
+            font-variant-numeric: tabular-nums;
+        }
+
     </style>
 </head>
 
 
 <body>
+
+<!-- ============================================================
+     Login Gate
+     ============================================================ -->
+
+<div id="v3Gate" role="dialog" aria-modal="true" aria-labelledby="v3GateTitle">
+    <form class="gate-box" id="v3GateForm" autocomplete="off">
+        <h1 id="v3GateTitle">台灣雨水下水道數值水理分析 V3</h1>
+        <p>請輸入存取密碼以進入系統。</p>
+        <label for="v3GatePassword">存取密碼</label>
+        <input id="v3GatePassword" type="password" inputmode="numeric"
+               autocomplete="off" required>
+        <div class="gate-msg" id="v3GateMsg" role="alert"></div>
+        <button class="btn btn-primary" id="v3GateSubmit" type="submit">登入</button>
+    </form>
+</div>
+
 
 <!-- ============================================================
      Header
@@ -969,6 +1074,11 @@
 
             <div>
                 V3 Engineering Numerical Hydraulic Model
+            </div>
+
+            <div class="visit-counter">
+                瀏覽累計人次數：
+                <strong id="visitCount">-</strong>
             </div>
 
         </div>
@@ -2446,6 +2556,10 @@ DEMO CASE
 <!-- ============================================================
      Application Scripts
      ============================================================ -->
+
+<script src="js/config.js"></script>
+
+<script src="js/gate.js"></script>
 
 <script src="js/hydraulic.js"></script>
 
