@@ -1424,7 +1424,13 @@
         const localLoss =
             calculateLocalLoss(
                 normalized,
-                result,
+                /*
+                 * [FIX] K 係數（entranceK / exitK / bendK / junctionK）
+                 * 存在於輸入管段 pipe，而非水理成果 result；
+                 * 原本只傳 result，導致所有局部損失恆為 0。
+                 * result 放後面，若成果內已有 localLoss 仍優先採用。
+                 */
+                { ...pipe, ...result },
                 settings,
                 velocity
             );
