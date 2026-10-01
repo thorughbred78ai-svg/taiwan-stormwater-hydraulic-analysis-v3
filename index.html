@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>台灣雨水下水道數值水理分析 V3</title>
+
+<meta name="description"
+      content="台灣雨水下水道數值水理分析 V3">
+
+<link rel="stylesheet"
+      href="css/style.css">
+
+<!-- Excel -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+</head>
+
+
+<body>
+
+<header class="header">
+
+    <div>
+
+        <h1>
+            台灣雨水下水道數值水理分析
+        </h1>
+
+        <div class="version">
+            V3 Numerical Hydraulic Engine
+        </div>
+
+        <div class="creator">
+            創建者：HHHuang
+        </div>
+
+    </div>
+
+</header>
+
+
+<nav class="tabs">
+
+<button class="tab active"
+        data-tab="project">
+    ① 工程
+</button>
+
+<button class="tab"
+        data-tab="nodes">
+    ② 節點
+</button>
+
+<button class="tab"
+        data-tab="pipes">
+    ③ 管段
+</button>
+
+<button class="tab"
+        data-tab="hydrology">
+    ④ 水文
+</button>
+
+<button class="tab"
+        data-tab="boundary">
+    ⑤ 邊界
+</button>
+
+<button class="tab"
+        data-tab="analysis">
+    ⑥ 數值分析
+</button>
+
+<button class="tab"
+        data-tab="checking">
+    ⑦ 系統檢核
+</button>
+
+<button class="tab"
+        data-tab="profile">
+    ⑧ HGL/EGL
+</button>
+
+<button class="tab"
+        data-tab="example">
+    ⑨ 示範
+</button>
+
+<button class="tab"
+        data-tab="export">
+    ⑩ 匯出
+</button>
+
+</nav>
+
+
+<main class="container">
+
+
+<!-- ================================================= -->
+<!-- 工程 -->
+<!-- ================================================= -->
+
+<section id="project"
+         class="tab-content active">
+
+<h2>工程基本資料</h2>
+
+<div class="card grid">
+
+<label>
+工程名稱
+<input id="projectName"
+       value="雨水下水道 V3 示範工程">
+</label>
+
+<label>
+設計重現期
+<input id="returnPeriod"
+       type="number"
+       value="10">
+</label>
+
+<label>
+設計降雨強度
+<input id="rainfallIntensity"
+       type="number"
+       value="100"
+       step="0.1">
+</label>
+
+<label>
+最小流速
+<input id="minVelocity"
+       type="number"
+       value="0.8"
+       step="0.1">
+</label>
+
+<label>
+最大流速
+<input id="maxVelocity"
+       type="number"
+       value="3.0"
+       step="0.1">
+</label>
+
+<label>
+數值迭代最大次數
+<input id="maxIteration"
+       type="number"
+       value="100">
+</label>
+
+</div>
+
+
+<div class="info">
+
+<strong>V3 數值分析架構</strong>
+
+<p>
+V3 將水文、管網拓樸、斷面幾何、
+能量方程及數值求解器分開。
+</p>
+
+<p>
+分析流程：
+水文 → 節點流量 → 管網求解 →
+能量損失 → HGL/EGL → 系統檢核。
+</p>
+
+</div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 節點 -->
+<!-- ================================================= -->
+
+<section id="nodes"
+         class="tab-content">
+
+<div class="section-title">
+
+<h2>節點資料</h2>
+
+<button class="primary"
+        onclick="addNode()">
+＋ 新增節點
+</button>
+
+</div>
+
+
+<div class="card table-wrap">
+
+<table id="nodeTable">
+
+<thead>
+
+<tr>
+
+<th>Node</th>
+<th>地面高程</th>
+<th>管底高程</th>
+<th>集水面積 ha</th>
+<th>C</th>
+<th>邊界類型</th>
+<th>邊界水位</th>
+<th>操作</th>
+
+</tr>
+
+</thead>
+
+<tbody></tbody>
+
+</table>
+
+</div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 管段 -->
+<!-- ================================================= -->
+
+<section id="pipes"
+         class="tab-content">
+
+<div class="section-title">
+
+<h2>管段資料</h2>
+
+<button class="primary"
+        onclick="addPipe()">
+＋ 新增管段
+</button>
+
+</div>
+
+
+<div class="card table-wrap">
+
+<table id="pipeTable">
+
+<thead>
+
+<tr>
+
+<th>Pipe</th>
+<th>上游</th>
+<th>下游</th>
+<th>長度 m</th>
+<th>管徑 m</th>
+<th>坡度</th>
+<th>Manning n</th>
+<th>入口 K</th>
+<th>出口 K</th>
+<th>操作</th>
+
+</tr>
+
+</thead>
+
+<tbody></tbody>
+
+</table>
+
+</div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 水文 -->
+<!-- ================================================= -->
+
+<section id="hydrology"
+         class="tab-content">
+
+<h2>水文分析</h2>
+
+<div class="card">
+
+<p>
+目前 V3 預設採 Rational Method：
+</p>
+
+<div class="formula">
+Q = 0.278 × C × I × A
+</div>
+
+<button class="primary"
+        onclick="runHydrology()">
+執行水文分析
+</button>
+
+</div>
+
+<div id="hydrologyResult"></div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 邊界 -->
+<!-- ================================================= -->
+
+<section id="boundary"
+         class="tab-content">
+
+<h2>下游邊界條件</h2>
+
+<div class="card">
+
+<div class="grid">
+
+<label>
+邊界模式
+
+<select id="boundaryMode">
+
+<option value="normal">
+正常水深
+</option>
+
+<option value="fixed">
+固定水位
+</option>
+
+<option value="critical">
+臨界水深
+</option>
+
+<option value="free">
+自由出流
+</option>
+
+</select>
+
+</label>
+
+
+<label>
+固定下游水位
+<input id="boundaryElevation"
+       type="number"
+       value="95">
+</label>
+
+
+<label>
+邊界安全裕度
+<input id="boundaryMargin"
+       type="number"
+       value="0.3"
+       step="0.01">
+</label>
+
+</div>
+
+</div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 分析 -->
+<!-- ================================================= -->
+
+<section id="analysis"
+         class="tab-content">
+
+<h2>數值水理分析</h2>
+
+<div class="card">
+
+<button class="primary"
+        onclick="runFullAnalysis()">
+▶ 執行 V3 完整分析
+</button>
+
+<button class="secondary"
+        onclick="resetResults()">
+清除成果
+</button>
+
+<div id="solverStatus"
+     class="solver-status">
+尚未分析
+</div>
+
+</div>
+
+<div id="analysisResult"></div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 檢核 -->
+<!-- ================================================= -->
+
+<section id="checking"
+         class="tab-content">
+
+<h2>系統檢核</h2>
+
+<div class="card">
+
+<button class="primary"
+        onclick="runChecking()">
+執行系統檢核
+</button>
+
+</div>
+
+<div id="checkingResult"></div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 剖面 -->
+<!-- ================================================= -->
+
+<section id="profile"
+         class="tab-content">
+
+<h2>
+HGL / EGL / 管底 / 地面縱剖面
+</h2>
+
+<div class="card">
+
+<canvas id="profileCanvas"
+        width="1500"
+        height="700">
+</canvas>
+
+</div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 示範 -->
+<!-- ================================================= -->
+
+<section id="example"
+         class="tab-content">
+
+<h2>示範案例</h2>
+
+<div class="card">
+
+<button class="primary"
+        onclick="loadExampleCase()">
+載入 V3 示範案例
+</button>
+
+<button class="primary"
+        onclick="runExampleCase()">
+載入並完整分析
+</button>
+
+</div>
+
+<div id="exampleResult"></div>
+
+</section>
+
+
+<!-- ================================================= -->
+<!-- 匯出 -->
+<!-- ================================================= -->
+
+<section id="export"
+         class="tab-content">
+
+<h2>工程成果匯出</h2>
+
+<div class="card export-grid">
+
+<button class="primary"
+        onclick="exportCSV()">
+CSV
+</button>
+
+<button class="primary"
+        onclick="exportExcel()">
+Excel
+</button>
+
+<button class="primary"
+        onclick="exportJSON()">
+JSON
+</button>
+
+<button class="secondary"
+        onclick="window.print()">
+列印 / PDF
+</button>
+
+</div>
+
+</section>
+
+</main>
+
+
+<footer>
+
+台灣雨水下水道數值水理分析 V3
+<br>
+創建者：HHHuang
+
+</footer>
+
+
+<script src="js/model.js"></script>
+<script src="js/geometry.js"></script>
+<script src="js/hydrology.js"></script>
+<script src="js/network.js"></script>
+<script src="js/solver.js"></script>
+<script src="js/hydraulic.js"></script>
+<script src="js/checking.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+
+</html>
