@@ -1,43 +1,969 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
-
 <head>
+    <meta charset="UTF-8">
 
-<meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-<meta name="viewport"
-      content="width=device-width, initial-scale=1.0">
+    <meta
+        name="description"
+        content="台灣雨水下水道數值水理分析 V3－節點、管段、Manning 非滿流、滿管切換、網路求解、HGL/EGL、下游回水與工程檢核"
+    >
 
-<title>台灣雨水下水道數值水理分析 V3</title>
+    <meta
+        name="author"
+        content="HHHuang"
+    >
 
-<meta name="description"
-      content="台灣雨水下水道數值水理分析 V3">
+    <title>
+        台灣雨水下水道數值水理分析 V3
+    </title>
 
-<link rel="stylesheet"
-      href="css/style.css">
 
-<!-- Excel -->
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- =========================================================
+         External Libraries
+         GitHub Pages 可直接使用 CDN
+         ========================================================= -->
 
+    <script
+        src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js">
+    </script>
+
+    <script
+        src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js">
+    </script>
+
+
+    <!-- =========================================================
+         Main Style
+         ========================================================= -->
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+
+        body {
+            margin: 0;
+            padding: 0;
+
+            font-family:
+                "Noto Sans TC",
+                "Microsoft JhengHei",
+                Arial,
+                sans-serif;
+
+            background:
+                #f3f6f9;
+
+            color:
+                #263238;
+
+            line-height:
+                1.6;
+        }
+
+
+        /* =====================================================
+           Header
+           ===================================================== */
+
+        header {
+            background:
+                linear-gradient(
+                    135deg,
+                    #0b3954,
+                    #087e8b
+                );
+
+            color:
+                white;
+
+            padding:
+                26px 24px;
+
+            box-shadow:
+                0 3px 12px
+                rgba(0,0,0,0.16);
+        }
+
+
+        .header-inner {
+            max-width:
+                1400px;
+
+            margin:
+                auto;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            justify-content:
+                space-between;
+
+            gap:
+                20px;
+        }
+
+
+        .title-area h1 {
+            margin:
+                0;
+
+            font-size:
+                clamp(22px, 3vw, 34px);
+
+            letter-spacing:
+                1px;
+        }
+
+
+        .title-area p {
+            margin:
+                5px 0 0;
+
+            opacity:
+                0.92;
+
+            font-size:
+                14px;
+        }
+
+
+        .creator {
+            text-align:
+                right;
+
+            font-size:
+                14px;
+
+            white-space:
+                nowrap;
+        }
+
+
+        .creator strong {
+            font-size:
+                16px;
+        }
+
+
+        /* =====================================================
+           Main
+           ===================================================== */
+
+        main {
+            width:
+                min(1400px, 96%);
+
+            margin:
+                20px auto 50px;
+        }
+
+
+        /* =====================================================
+           Status Bar
+           ===================================================== */
+
+        .status-bar {
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(4, 1fr);
+
+            gap:
+                12px;
+
+            margin-bottom:
+                16px;
+        }
+
+
+        .status-card {
+            background:
+                white;
+
+            border-radius:
+                10px;
+
+            padding:
+                13px 16px;
+
+            border-left:
+                5px solid #0b7285;
+
+            box-shadow:
+                0 2px 8px
+                rgba(0,0,0,0.06);
+        }
+
+
+        .status-card .label {
+            color:
+                #607d8b;
+
+            font-size:
+                12px;
+        }
+
+
+        .status-card .value {
+            margin-top:
+                3px;
+
+            font-size:
+                18px;
+
+            font-weight:
+                700;
+        }
+
+
+        /* =====================================================
+           Tabs
+           ===================================================== */
+
+        .tabs {
+            display:
+                flex;
+
+            flex-wrap:
+                wrap;
+
+            gap:
+                4px;
+
+            background:
+                #dfe7ec;
+
+            padding:
+                5px;
+
+            border-radius:
+                10px 10px 0 0;
+        }
+
+
+        .tab-button {
+            border:
+                none;
+
+            background:
+                transparent;
+
+            padding:
+                11px 17px;
+
+            border-radius:
+                7px;
+
+            cursor:
+                pointer;
+
+            font-size:
+                14px;
+
+            color:
+                #37474f;
+
+            transition:
+                0.2s;
+        }
+
+
+        .tab-button:hover {
+            background:
+                rgba(255,255,255,0.65);
+        }
+
+
+        .tab-button.active {
+            background:
+                white;
+
+            color:
+                #006d77;
+
+            font-weight:
+                700;
+
+            box-shadow:
+                0 2px 6px
+                rgba(0,0,0,0.08);
+        }
+
+
+        .tab-content {
+            display:
+                none;
+
+            background:
+                white;
+
+            padding:
+                22px;
+
+            border-radius:
+                0 0 10px 10px;
+
+            box-shadow:
+                0 3px 12px
+                rgba(0,0,0,0.07);
+        }
+
+
+        .tab-content.active {
+            display:
+                block;
+        }
+
+
+        /* =====================================================
+           Section
+           ===================================================== */
+
+        .section-title {
+            margin:
+                0 0 15px;
+
+            color:
+                #0b3954;
+
+            font-size:
+                21px;
+
+            border-bottom:
+                2px solid #e8eef2;
+
+            padding-bottom:
+                8px;
+        }
+
+
+        .sub-title {
+            margin:
+                20px 0 10px;
+
+            color:
+                #087e8b;
+
+            font-size:
+                17px;
+        }
+
+
+        .info-box {
+            background:
+                #eef8fa;
+
+            border-left:
+                4px solid #0b7285;
+
+            padding:
+                12px 15px;
+
+            margin:
+                12px 0;
+
+            border-radius:
+                5px;
+
+            font-size:
+                14px;
+        }
+
+
+        .warning-box {
+            background:
+                #fff8e1;
+
+            border-left:
+                4px solid #f4a261;
+
+            padding:
+                12px 15px;
+
+            margin:
+                12px 0;
+
+            border-radius:
+                5px;
+
+            font-size:
+                14px;
+        }
+
+
+        /* =====================================================
+           Grid
+           ===================================================== */
+
+        .grid-2 {
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+
+            gap:
+                18px;
+        }
+
+
+        .grid-3 {
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(3, minmax(0, 1fr));
+
+            gap:
+                15px;
+        }
+
+
+        .grid-4 {
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(4, minmax(0, 1fr));
+
+            gap:
+                12px;
+        }
+
+
+        .panel {
+            border:
+                1px solid #dce5ea;
+
+            border-radius:
+                8px;
+
+            padding:
+                15px;
+
+            background:
+                #fbfcfd;
+        }
+
+
+        /* =====================================================
+           Form
+           ===================================================== */
+
+        label {
+            display:
+                block;
+
+            font-size:
+                13px;
+
+            color:
+                #455a64;
+
+            margin-bottom:
+                4px;
+
+            font-weight:
+                600;
+        }
+
+
+        input,
+        select,
+        textarea {
+            width:
+                100%;
+
+            border:
+                1px solid #cbd5db;
+
+            border-radius:
+                5px;
+
+            padding:
+                8px 10px;
+
+            font-size:
+                14px;
+
+            background:
+                white;
+        }
+
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline:
+                none;
+
+            border-color:
+                #087e8b;
+
+            box-shadow:
+                0 0 0 2px
+                rgba(8,126,139,0.12);
+        }
+
+
+        .form-row {
+            margin-bottom:
+                10px;
+        }
+
+
+        /* =====================================================
+           Buttons
+           ===================================================== */
+
+        button {
+            font-family:
+                inherit;
+        }
+
+
+        .btn {
+            border:
+                none;
+
+            border-radius:
+                6px;
+
+            padding:
+                9px 16px;
+
+            cursor:
+                pointer;
+
+            font-size:
+                14px;
+
+            font-weight:
+                600;
+
+            transition:
+                0.2s;
+
+            margin:
+                3px;
+        }
+
+
+        .btn:hover {
+            transform:
+                translateY(-1px);
+
+            box-shadow:
+                0 3px 8px
+                rgba(0,0,0,0.13);
+        }
+
+
+        .btn-primary {
+            background:
+                #087e8b;
+
+            color:
+                white;
+        }
+
+
+        .btn-success {
+            background:
+                #2a9d8f;
+
+            color:
+                white;
+        }
+
+
+        .btn-warning {
+            background:
+                #f4a261;
+
+            color:
+                #263238;
+        }
+
+
+        .btn-danger {
+            background:
+                #d62828;
+
+            color:
+                white;
+        }
+
+
+        .btn-secondary {
+            background:
+                #607d8b;
+
+            color:
+                white;
+        }
+
+
+        .btn-light {
+            background:
+                #e9eef1;
+
+            color:
+                #263238;
+        }
+
+
+        .button-row {
+            display:
+                flex;
+
+            flex-wrap:
+                wrap;
+
+            gap:
+                5px;
+
+            margin:
+                15px 0;
+        }
+
+
+        /* =====================================================
+           Tables
+           ===================================================== */
+
+        .table-wrap {
+            width:
+                100%;
+
+            overflow-x:
+                auto;
+
+            border:
+                1px solid #dce5ea;
+
+            border-radius:
+                7px;
+
+            background:
+                white;
+        }
+
+
+        table {
+            width:
+                100%;
+
+            border-collapse:
+                collapse;
+
+            font-size:
+                13px;
+
+            min-width:
+                760px;
+        }
+
+
+        th {
+            background:
+                #0b3954;
+
+            color:
+                white;
+
+            padding:
+                9px 8px;
+
+            text-align:
+                center;
+
+            white-space:
+                nowrap;
+        }
+
+
+        td {
+            border-bottom:
+                1px solid #e6ecef;
+
+            padding:
+                7px 8px;
+
+            text-align:
+                center;
+
+            white-space:
+                nowrap;
+        }
+
+
+        tbody tr:hover {
+            background:
+                #f4fafb;
+        }
+
+
+        /* =====================================================
+           Status badges
+           ===================================================== */
+
+        .badge {
+            display:
+                inline-block;
+
+            padding:
+                3px 9px;
+
+            border-radius:
+                999px;
+
+            font-size:
+                12px;
+
+            font-weight:
+                700;
+        }
+
+
+        .badge-pass {
+            background:
+                #d8f3dc;
+
+            color:
+                #1b5e20;
+        }
+
+
+        .badge-warn {
+            background:
+                #fff3cd;
+
+            color:
+                #856404;
+        }
+
+
+        .badge-fail {
+            background:
+                #f8d7da;
+
+            color:
+                #842029;
+        }
+
+
+        .badge-neutral {
+            background:
+                #e9ecef;
+
+            color:
+                #495057;
+        }
+
+
+        /* =====================================================
+           Chart
+           ===================================================== */
+
+        .chart-container {
+            position:
+                relative;
+
+            width:
+                100%;
+
+            height:
+                450px;
+
+            margin-top:
+                15px;
+
+            border:
+                1px solid #dce5ea;
+
+            border-radius:
+                8px;
+
+            padding:
+                10px;
+
+            background:
+                white;
+        }
+
+
+        /* =====================================================
+           Code / calculation description
+           ===================================================== */
+
+        .formula {
+            background:
+                #263238;
+
+            color:
+                #e8f5e9;
+
+            padding:
+                14px;
+
+            border-radius:
+                7px;
+
+            font-family:
+                Consolas,
+                "Courier New",
+                monospace;
+
+            overflow-x:
+                auto;
+
+            font-size:
+                13px;
+
+            line-height:
+                1.7;
+        }
+
+
+        /* =====================================================
+           Footer
+           ===================================================== */
+
+        footer {
+            max-width:
+                1400px;
+
+            width:
+                96%;
+
+            margin:
+                0 auto 30px;
+
+            color:
+                #607d8b;
+
+            text-align:
+                center;
+
+            font-size:
+                12px;
+        }
+
+
+        /* =====================================================
+           Responsive
+           ===================================================== */
+
+        @media (max-width: 900px) {
+
+            .status-bar {
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+
+
+            .grid-2,
+            .grid-3,
+            .grid-4 {
+                grid-template-columns:
+                    1fr;
+            }
+
+
+            .header-inner {
+                flex-direction:
+                    column;
+
+                align-items:
+                    flex-start;
+            }
+
+
+            .creator {
+                text-align:
+                    left;
+            }
+
+        }
+
+
+        @media (max-width: 600px) {
+
+            .status-bar {
+                grid-template-columns:
+                    1fr;
+            }
+
+
+            .tab-button {
+                flex:
+                    1 1 auto;
+            }
+
+
+            .tab-content {
+                padding:
+                    14px;
+            }
+
+        }
+
+    </style>
 </head>
 
 
 <body>
 
-<header class="header">
+<!-- ============================================================
+     Header
+     ============================================================ -->
 
-    <div>
+<header>
 
-        <h1>
-            台灣雨水下水道數值水理分析
-        </h1>
+    <div class="header-inner">
 
-        <div class="version">
-            V3 Numerical Hydraulic Engine
+        <div class="title-area">
+
+            <h1>
+                台灣雨水下水道數值水理分析 V3
+            </h1>
+
+            <p>
+                節點／管段網路水理・Manning 非滿流・滿管切換・HGL／EGL・下游回水・工程檢核
+            </p>
+
         </div>
 
+
         <div class="creator">
-            創建者：HHHuang
+
+            <div>
+                創建者：
+                <strong>HHHuang</strong>
+            </div>
+
+            <div>
+                V3 Engineering Numerical Hydraulic Model
+            </div>
+
         </div>
 
     </div>
@@ -45,500 +971,1840 @@
 </header>
 
 
-<nav class="tabs">
-
-<button class="tab active"
-        data-tab="project">
-    ① 工程
-</button>
-
-<button class="tab"
-        data-tab="nodes">
-    ② 節點
-</button>
-
-<button class="tab"
-        data-tab="pipes">
-    ③ 管段
-</button>
-
-<button class="tab"
-        data-tab="hydrology">
-    ④ 水文
-</button>
-
-<button class="tab"
-        data-tab="boundary">
-    ⑤ 邊界
-</button>
-
-<button class="tab"
-        data-tab="analysis">
-    ⑥ 數值分析
-</button>
-
-<button class="tab"
-        data-tab="checking">
-    ⑦ 系統檢核
-</button>
+<main>
 
-<button class="tab"
-        data-tab="profile">
-    ⑧ HGL/EGL
-</button>
-
-<button class="tab"
-        data-tab="example">
-    ⑨ 示範
-</button>
 
-<button class="tab"
-        data-tab="export">
-    ⑩ 匯出
-</button>
+    <!-- ========================================================
+         Status
+         ======================================================== -->
 
-</nav>
+    <section class="status-bar">
 
+        <div class="status-card">
 
-<main class="container">
+            <div class="label">
+                水理求解狀態
+            </div>
 
+            <div
+                class="value"
+                id="solverStatus"
+            >
+                尚未計算
+            </div>
 
-<!-- ================================================= -->
-<!-- 工程 -->
-<!-- ================================================= -->
+        </div>
 
-<section id="project"
-         class="tab-content active">
 
-<h2>工程基本資料</h2>
+        <div class="status-card">
 
-<div class="card grid">
+            <div class="label">
+                管段數
+            </div>
 
-<label>
-工程名稱
-<input id="projectName"
-       value="雨水下水道 V3 示範工程">
-</label>
+            <div
+                class="value"
+                id="pipeCount"
+            >
+                0
+            </div>
 
-<label>
-設計重現期
-<input id="returnPeriod"
-       type="number"
-       value="10">
-</label>
+        </div>
 
-<label>
-設計降雨強度
-<input id="rainfallIntensity"
-       type="number"
-       value="100"
-       step="0.1">
-</label>
 
-<label>
-最小流速
-<input id="minVelocity"
-       type="number"
-       value="0.8"
-       step="0.1">
-</label>
+        <div class="status-card">
 
-<label>
-最大流速
-<input id="maxVelocity"
-       type="number"
-       value="3.0"
-       step="0.1">
-</label>
+            <div class="label">
+                節點數
+            </div>
 
-<label>
-數值迭代最大次數
-<input id="maxIteration"
-       type="number"
-       value="100">
-</label>
+            <div
+                class="value"
+                id="nodeCount"
+            >
+                0
+            </div>
 
-</div>
+        </div>
 
 
-<div class="info">
+        <div class="status-card">
 
-<strong>V3 數值分析架構</strong>
+            <div class="label">
+                工程檢核
+            </div>
 
-<p>
-V3 將水文、管網拓樸、斷面幾何、
-能量方程及數值求解器分開。
-</p>
+            <div
+                class="value"
+                id="checkingStatus"
+            >
+                尚未檢核
+            </div>
 
-<p>
-分析流程：
-水文 → 節點流量 → 管網求解 →
-能量損失 → HGL/EGL → 系統檢核。
-</p>
+        </div>
 
-</div>
+    </section>
 
-</section>
 
+    <!-- ========================================================
+         Tabs
+         ======================================================== -->
 
-<!-- ================================================= -->
-<!-- 節點 -->
-<!-- ================================================= -->
+    <nav class="tabs">
 
-<section id="nodes"
-         class="tab-content">
+        <button
+            class="tab-button active"
+            data-tab="tab-intro"
+        >
+            系統說明
+        </button>
 
-<div class="section-title">
+        <button
+            class="tab-button"
+            data-tab="tab-nodes"
+        >
+            節點輸入
+        </button>
 
-<h2>節點資料</h2>
+        <button
+            class="tab-button"
+            data-tab="tab-pipes"
+        >
+            管段輸入
+        </button>
 
-<button class="primary"
-        onclick="addNode()">
-＋ 新增節點
-</button>
+        <button
+            class="tab-button"
+            data-tab="tab-hydraulic"
+        >
+            水理分析
+        </button>
 
-</div>
+        <button
+            class="tab-button"
+            data-tab="tab-hgl"
+        >
+            HGL / EGL
+        </button>
 
+        <button
+            class="tab-button"
+            data-tab="tab-check"
+        >
+            系統檢核
+        </button>
 
-<div class="card table-wrap">
+        <button
+            class="tab-button"
+            data-tab="tab-case"
+        >
+            示範案例
+        </button>
 
-<table id="nodeTable">
+        <button
+            class="tab-button"
+            data-tab="tab-export"
+        >
+            成果匯出
+        </button>
 
-<thead>
+    </nav>
 
-<tr>
 
-<th>Node</th>
-<th>地面高程</th>
-<th>管底高程</th>
-<th>集水面積 ha</th>
-<th>C</th>
-<th>邊界類型</th>
-<th>邊界水位</th>
-<th>操作</th>
+    <!-- ========================================================
+         TAB 1 — Introduction
+         ======================================================== -->
 
-</tr>
+    <section
+        class="tab-content active"
+        id="tab-intro"
+    >
 
-</thead>
+        <h2 class="section-title">
+            台灣雨水下水道數值水理分析 V3
+        </h2>
 
-<tbody></tbody>
 
-</table>
+        <div class="info-box">
 
-</div>
+            本系統 V3 已由單純展示介面推進為
+            「節點／管段網路數值水理分析」架構。
+            水理計算核心、HGL/EGL 成果分析及工程檢核分離，
+            便於後續依工程案件調整檢核參數。
 
-</section>
+        </div>
 
 
-<!-- ================================================= -->
-<!-- 管段 -->
-<!-- ================================================= -->
+        <h3 class="sub-title">
+            目前計算功能
+        </h3>
 
-<section id="pipes"
-         class="tab-content">
 
-<div class="section-title">
+        <div class="grid-3">
 
-<h2>管段資料</h2>
+            <div class="panel">
 
-<button class="primary"
-        onclick="addPipe()">
-＋ 新增管段
-</button>
+                <strong>
+                    ① 網路拓撲
+                </strong>
 
-</div>
+                <p>
+                    節點、管段、上游節點、下游節點及匯流關係。
+                </p>
 
+            </div>
 
-<div class="card table-wrap">
 
-<table id="pipeTable">
+            <div class="panel">
 
-<thead>
+                <strong>
+                    ② 節點連續方程
+                </strong>
 
-<tr>
+                <p>
+                    以節點流量平衡建立雨水下水道網路求解。
+                </p>
 
-<th>Pipe</th>
-<th>上游</th>
-<th>下游</th>
-<th>長度 m</th>
-<th>管徑 m</th>
-<th>坡度</th>
-<th>Manning n</th>
-<th>入口 K</th>
-<th>出口 K</th>
-<th>操作</th>
+            </div>
 
-</tr>
 
-</thead>
+            <div class="panel">
 
-<tbody></tbody>
+                <strong>
+                    ③ Manning 非滿流
+                </strong>
 
-</table>
+                <p>
+                    圓形管渠依水深計算面積、濕周、水力半徑及流速。
+                </p>
 
-</div>
+            </div>
 
-</section>
 
+            <div class="panel">
 
-<!-- ================================================= -->
-<!-- 水文 -->
-<!-- ================================================= -->
+                <strong>
+                    ④ 滿管切換
+                </strong>
 
-<section id="hydrology"
-         class="tab-content">
+                <p>
+                    當水深達管徑時進入滿管／壓力流判斷邏輯。
+                </p>
 
-<h2>水文分析</h2>
+            </div>
 
-<div class="card">
 
-<p>
-目前 V3 預設採 Rational Method：
-</p>
+            <div class="panel">
 
-<div class="formula">
-Q = 0.278 × C × I × A
-</div>
+                <strong>
+                    ⑤ HGL / EGL
+                </strong>
 
-<button class="primary"
-        onclick="runHydrology()">
-執行水文分析
-</button>
+                <p>
+                    由水深、管底、速度水頭及能量損失建立水力坡線。
+                </p>
 
-</div>
+            </div>
 
-<div id="hydrologyResult"></div>
 
-</section>
+            <div class="panel">
 
+                <strong>
+                    ⑥ 下游回水
+                </strong>
 
-<!-- ================================================= -->
-<!-- 邊界 -->
-<!-- ================================================= -->
+                <p>
+                    由下游控制水位沿管網反算上游能量線及水力坡線。
+                </p>
 
-<section id="boundary"
-         class="tab-content">
+            </div>
 
-<h2>下游邊界條件</h2>
+        </div>
 
-<div class="card">
 
-<div class="grid">
+        <h3 class="sub-title">
+            計算架構
+        </h3>
 
-<label>
-邊界模式
 
-<select id="boundaryMode">
+        <div class="formula">
 
-<option value="normal">
-正常水深
-</option>
+Input Nodes / Pipes
+        ↓
+Hydraulic Network Solver
+        ↓
+Node Continuity
+        ↓
+Manning Partial Flow
+        ↓
+Full-Pipe / Pressure Transition
+        ↓
+window.v3HydraulicSolution
+        ↓
+HGL / EGL Engine
+        ↓
+Friction Loss + Local Loss
+        ↓
+Downstream Boundary / Backwater
+        ↓
+window.v3HglEglSolution
+        ↓
+Engineering Checking
+        ↓
+Profile / CSV / Excel
+        </div>
 
-<option value="fixed">
-固定水位
-</option>
 
-<option value="critical">
-臨界水深
-</option>
+        <h3 class="sub-title">
+            規範依據與使用原則
+        </h3>
 
-<option value="free">
-自由出流
-</option>
 
-</select>
+        <div class="info-box">
 
-</label>
+            本系統將「水理計算」與「工程檢核參數」分離。
+            例如計畫下水量時的流速檢核值，不應直接寫死於
+            hydraulic.js，而由 checking.js 的工程檢核設定管理。
 
+        </div>
 
-<label>
-固定下游水位
-<input id="boundaryElevation"
-       type="number"
-       value="95">
-</label>
 
+        <div class="warning-box">
 
-<label>
-邊界安全裕度
-<input id="boundaryMargin"
-       type="number"
-       value="0.3"
-       step="0.01">
-</label>
+            <strong>工程使用注意：</strong>
+            本系統為數值水理分析工具。正式工程設計仍應依案件條件、
+            最新法規、設計指南、地形測量、管網調查、邊界條件及
+            技師專業判斷進行確認。
 
-</div>
+        </div>
 
-</div>
+    </section>
 
-</section>
 
+    <!-- ========================================================
+         TAB 2 — Nodes
+         ======================================================== -->
 
-<!-- ================================================= -->
-<!-- 分析 -->
-<!-- ================================================= -->
+    <section
+        class="tab-content"
+        id="tab-nodes"
+    >
 
-<section id="analysis"
-         class="tab-content">
+        <h2 class="section-title">
+            節點資料輸入
+        </h2>
 
-<h2>數值水理分析</h2>
 
-<div class="card">
+        <div class="info-box">
 
-<button class="primary"
-        onclick="runFullAnalysis()">
-▶ 執行 V3 完整分析
-</button>
+            輸入節點編號、管底高程、地面高程及設計入流量。
+            匯流節點可以具有多條 incoming pipes。
 
-<button class="secondary"
-        onclick="resetResults()">
-清除成果
-</button>
+        </div>
 
-<div id="solverStatus"
-     class="solver-status">
-尚未分析
-</div>
 
-</div>
+        <div class="button-row">
 
-<div id="analysisResult"></div>
+            <button
+                class="btn btn-primary"
+                id="addNodeBtn"
+            >
+                ＋ 新增節點
+            </button>
 
-</section>
+            <button
+                class="btn btn-secondary"
+                id="loadDemoNodeBtn"
+            >
+                載入示範節點
+            </button>
 
+            <button
+                class="btn btn-light"
+                id="clearNodeBtn"
+            >
+                清除節點
+            </button>
 
-<!-- ================================================= -->
-<!-- 檢核 -->
-<!-- ================================================= -->
+        </div>
 
-<section id="checking"
-         class="tab-content">
 
-<h2>系統檢核</h2>
+        <div class="table-wrap">
 
-<div class="card">
+            <table>
 
-<button class="primary"
-        onclick="runChecking()">
-執行系統檢核
-</button>
+                <thead>
 
-</div>
+                    <tr>
 
-<div id="checkingResult"></div>
+                        <th>
+                            Node ID
+                        </th>
 
-</section>
+                        <th>
+                            管底高程 (m)
+                        </th>
 
+                        <th>
+                            地面高程 (m)
+                        </th>
 
-<!-- ================================================= -->
-<!-- 剖面 -->
-<!-- ================================================= -->
+                        <th>
+                            外部入流 Q (m³/s)
+                        </th>
 
-<section id="profile"
-         class="tab-content">
+                        <th>
+                            下游 HGL / 水位
+                        </th>
 
-<h2>
-HGL / EGL / 管底 / 地面縱剖面
-</h2>
+                        <th>
+                            操作
+                        </th>
 
-<div class="card">
+                    </tr>
 
-<canvas id="profileCanvas"
-        width="1500"
-        height="700">
-</canvas>
+                </thead>
 
-</div>
 
-</section>
+                <tbody id="nodeTableBody">
 
+                </tbody>
 
-<!-- ================================================= -->
-<!-- 示範 -->
-<!-- ================================================= -->
+            </table>
 
-<section id="example"
-         class="tab-content">
+        </div>
 
-<h2>示範案例</h2>
+    </section>
 
-<div class="card">
 
-<button class="primary"
-        onclick="loadExampleCase()">
-載入 V3 示範案例
-</button>
+    <!-- ========================================================
+         TAB 3 — Pipes
+         ======================================================== -->
 
-<button class="primary"
-        onclick="runExampleCase()">
-載入並完整分析
-</button>
+    <section
+        class="tab-content"
+        id="tab-pipes"
+    >
 
-</div>
+        <h2 class="section-title">
+            管段資料輸入
+        </h2>
 
-<div id="exampleResult"></div>
 
-</section>
+        <div class="info-box">
 
+            管段由上游節點流向下游節點。
+            Manning 粗糙係數 n、管徑、長度及局部損失係數
+            由工程資料提供。
 
-<!-- ================================================= -->
-<!-- 匯出 -->
-<!-- ================================================= -->
+        </div>
 
-<section id="export"
-         class="tab-content">
 
-<h2>工程成果匯出</h2>
+        <div class="button-row">
 
-<div class="card export-grid">
+            <button
+                class="btn btn-primary"
+                id="addPipeBtn"
+            >
+                ＋ 新增管段
+            </button>
 
-<button class="primary"
-        onclick="exportCSV()">
-CSV
-</button>
+            <button
+                class="btn btn-secondary"
+                id="loadDemoPipeBtn"
+            >
+                載入示範管段
+            </button>
 
-<button class="primary"
-        onclick="exportExcel()">
-Excel
-</button>
+            <button
+                class="btn btn-light"
+                id="clearPipeBtn"
+            >
+                清除管段
+            </button>
 
-<button class="primary"
-        onclick="exportJSON()">
-JSON
-</button>
+        </div>
 
-<button class="secondary"
-        onclick="window.print()">
-列印 / PDF
-</button>
 
-</div>
+        <div class="table-wrap">
 
-</section>
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            Pipe ID
+                        </th>
+
+                        <th>
+                            上游 Node
+                        </th>
+
+                        <th>
+                            下游 Node
+                        </th>
+
+                        <th>
+                            長度 L (m)
+                        </th>
+
+                        <th>
+                            管徑 D (m)
+                        </th>
+
+                        <th>
+                            Manning n
+                        </th>
+
+                        <th>
+                            入口 K
+                        </th>
+
+                        <th>
+                            彎頭 K
+                        </th>
+
+                        <th>
+                            出口 K
+                        </th>
+
+                        <th>
+                            操作
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="pipeTableBody">
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <!-- ========================================================
+         TAB 4 — Hydraulic
+         ======================================================== -->
+
+    <section
+        class="tab-content"
+        id="tab-hydraulic"
+    >
+
+        <h2 class="section-title">
+            水理分析
+        </h2>
+
+
+        <div class="grid-3">
+
+            <div class="panel">
+
+                <label>
+                    重力加速度 g (m/s²)
+                </label>
+
+                <input
+                    id="gravityInput"
+                    type="number"
+                    step="0.00001"
+                    value="9.80665"
+                >
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    收斂容許誤差
+                </label>
+
+                <input
+                    id="solverToleranceInput"
+                    type="number"
+                    step="0.000001"
+                    value="0.000001"
+                >
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大迭代次數
+                </label>
+
+                <input
+                    id="maxIterationInput"
+                    type="number"
+                    step="1"
+                    value="100"
+                >
+
+            </div>
+
+        </div>
+
+
+        <div class="button-row">
+
+            <button
+                class="btn btn-success"
+                id="runHydraulicBtn"
+            >
+                ▶ 執行 V3 水理分析
+            </button>
+
+            <button
+                class="btn btn-warning"
+                id="runFullAnalysisBtn"
+            >
+                ▶ 水理＋HGL/EGL＋檢核
+            </button>
+
+            <button
+                class="btn btn-secondary"
+                id="resetSolutionBtn"
+            >
+                重設成果
+            </button>
+
+        </div>
+
+
+        <div class="grid-4">
+
+            <div class="panel">
+
+                <label>
+                    總流量
+                </label>
+
+                <div
+                    id="summaryQ"
+                    style="font-size:20px;font-weight:bold;"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大流速
+                </label>
+
+                <div
+                    id="summaryV"
+                    style="font-size:20px;font-weight:bold;"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大 HGL
+                </label>
+
+                <div
+                    id="summaryHGL"
+                    style="font-size:20px;font-weight:bold;"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大 EGL
+                </label>
+
+                <div
+                    id="summaryEGL"
+                    style="font-size:20px;font-weight:bold;"
+                >
+                    -
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <h3 class="sub-title">
+            管段水理計算結果
+        </h3>
+
+
+        <div class="table-wrap">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            Pipe
+                        </th>
+
+                        <th>
+                            Q (m³/s)
+                        </th>
+
+                        <th>
+                            水深 (m)
+                        </th>
+
+                        <th>
+                            V (m/s)
+                        </th>
+
+                        <th>
+                            Area (m²)
+                        </th>
+
+                        <th>
+                            R (m)
+                        </th>
+
+                        <th>
+                            Fr
+                        </th>
+
+                        <th>
+                            流況
+                        </th>
+
+                        <th>
+                            摩阻損失 (m)
+                        </th>
+
+                        <th>
+                            局部損失 (m)
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="hydraulicResultBody">
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <!-- ========================================================
+         TAB 5 — HGL EGL
+         ======================================================== -->
+
+    <section
+        class="tab-content"
+        id="tab-hgl"
+    >
+
+        <h2 class="section-title">
+            HGL / EGL 水理成果
+        </h2>
+
+
+        <div class="info-box">
+
+            本頁直接讀取
+            <code>window.v3HydraulicSolution.pipeResults</code>，
+            再由 HGL/EGL Engine 計算管底、水深、HGL、EGL、
+            Manning 摩阻損失、局部損失及下游回水。
+        </div>
+
+
+        <div class="button-row">
+
+            <button
+                class="btn btn-primary"
+                id="calculateHglBtn"
+            >
+                計算 HGL / EGL
+            </button>
+
+            <button
+                class="btn btn-success"
+                id="drawProfileBtn"
+            >
+                繪製縱剖面
+            </button>
+
+        </div>
+
+
+        <div class="grid-3">
+
+            <div class="panel">
+
+                <label>
+                    最大 HGL (m)
+                </label>
+
+                <div id="hglMax">
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大 EGL (m)
+                </label>
+
+                <div id="eglMax">
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大回水水頭 (m)
+                </label>
+
+                <div id="backwaterMax">
+                    -
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div
+            class="chart-container"
+            id="hydraulicProfileChart"
+        >
+
+            <canvas
+                id="hydraulicProfileCanvas"
+            ></canvas>
+
+        </div>
+
+
+        <h3 class="sub-title">
+            HGL / EGL 管段成果
+        </h3>
+
+
+        <div class="table-wrap">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            Pipe
+                        </th>
+
+                        <th>
+                            上游管底
+                        </th>
+
+                        <th>
+                            下游管底
+                        </th>
+
+                        <th>
+                            上游 HGL
+                        </th>
+
+                        <th>
+                            下游 HGL
+                        </th>
+
+                        <th>
+                            上游 EGL
+                        </th>
+
+                        <th>
+                            下游 EGL
+                        </th>
+
+                        <th>
+                            摩阻損失
+                        </th>
+
+                        <th>
+                            局部損失
+                        </th>
+
+                        <th>
+                            回水
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="hglResultBody">
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <!-- ========================================================
+         TAB 6 — Checking
+         ======================================================== -->
+
+    <section
+        class="tab-content"
+        id="tab-check"
+    >
+
+        <h2 class="section-title">
+            系統工程檢核
+        </h2>
+
+
+        <div class="info-box">
+
+            檢核條件由
+            <code>checking.js</code>
+            管理，不由
+            <code>hydraulic.js</code>
+            硬寫規範判斷。
+            可依工程案件調整並記錄檢核參數。
+
+        </div>
+
+
+        <h3 class="sub-title">
+            流速檢核參數
+        </h3>
+
+
+        <div class="grid-3">
+
+            <div class="panel">
+
+                <label>
+                    最小流速 Vmin (m/s)
+                </label>
+
+                <input
+                    id="checkVmin"
+                    type="number"
+                    step="0.01"
+                    value="0.8"
+                >
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    最大流速 Vmax (m/s)
+                </label>
+
+                <input
+                    id="checkVmax"
+                    type="number"
+                    step="0.01"
+                    value="3.0"
+                >
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    流速檢核
+                </label>
+
+                <select id="checkVelocityEnabled">
+
+                    <option value="true">
+                        啟用
+                    </option>
+
+                    <option value="false">
+                        不啟用
+                    </option>
+
+                </select>
+
+            </div>
+
+        </div>
+
+
+        <h3 class="sub-title">
+            管徑與連續方程檢核
+        </h3>
+
+
+        <div class="grid-3">
+
+            <div class="panel">
+
+                <label>
+                    最小管徑 (m)
+                </label>
+
+                <input
+                    id="checkMinDiameter"
+                    type="number"
+                    step="0.001"
+                    value="0.800"
+                >
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    節點連續誤差容許值
+                </label>
+
+                <input
+                    id="checkNodeTolerance"
+                    type="number"
+                    step="0.000001"
+                    value="0.000001"
+                >
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    超高／滿管檢核
+                </label>
+
+                <select id="checkSurcharge">
+
+                    <option value="true">
+                        啟用
+                    </option>
+
+                    <option value="false">
+                        不啟用
+                    </option>
+
+                </select>
+
+            </div>
+
+        </div>
+
+
+        <div class="button-row">
+
+            <button
+                class="btn btn-success"
+                id="runCheckingBtn"
+            >
+                ▶ 執行工程檢核
+            </button>
+
+        </div>
+
+
+        <div class="grid-4">
+
+            <div class="panel">
+
+                <label>
+                    PASS
+                </label>
+
+                <div
+                    id="checkPassCount"
+                    style="font-size:22px;font-weight:bold;color:#2a9d8f;"
+                >
+                    0
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    WARN
+                </label>
+
+                <div
+                    id="checkWarnCount"
+                    style="font-size:22px;font-weight:bold;color:#f4a261;"
+                >
+                    0
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    FAIL
+                </label>
+
+                <div
+                    id="checkFailCount"
+                    style="font-size:22px;font-weight:bold;color:#d62828;"
+                >
+                    0
+                </div>
+
+            </div>
+
+
+            <div class="panel">
+
+                <label>
+                    總檢核項目
+                </label>
+
+                <div
+                    id="checkTotalCount"
+                    style="font-size:22px;font-weight:bold;"
+                >
+                    0
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <h3 class="sub-title">
+            檢核結果
+        </h3>
+
+
+        <div class="table-wrap">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            Pipe / Node
+                        </th>
+
+                        <th>
+                            檢核項目
+                        </th>
+
+                        <th>
+                            計算值
+                        </th>
+
+                        <th>
+                            下限
+                        </th>
+
+                        <th>
+                            上限
+                        </th>
+
+                        <th>
+                            狀態
+                        </th>
+
+                        <th>
+                            說明
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="checkingResultBody">
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </section>
+
+
+    <!-- ========================================================
+         TAB 7 — Demo Case
+         ======================================================== -->
+
+    <section
+        class="tab-content"
+        id="tab-case"
+    >
+
+        <h2 class="section-title">
+            示範案例
+        </h2>
+
+
+        <div class="info-box">
+
+            本示範案例用於確認 V3 程式流程：
+            節點 → 管段 → 水理求解 → HGL/EGL → 工程檢核 → 成果匯出。
+            示範數值不是特定工程案件設計值。
+
+        </div>
+
+
+        <div class="grid-3">
+
+            <div class="panel">
+
+                <strong>
+                    DEMO-N01
+                </strong>
+
+                <p>
+                    上游集水節點
+                </p>
+
+            </div>
+
+
+            <div class="panel">
+
+                <strong>
+                    DEMO-N02
+                </strong>
+
+                <p>
+                    中間匯流節點
+                </p>
+
+            </div>
+
+
+            <div class="panel">
+
+                <strong>
+                    DEMO-N03
+                </strong>
+
+                <p>
+                    下游出口節點
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="button-row">
+
+            <button
+                class="btn btn-primary"
+                id="loadDemoCaseBtn"
+            >
+                載入完整示範案例
+            </button>
+
+
+            <button
+                class="btn btn-success"
+                id="runDemoCaseBtn"
+            >
+                載入並執行完整分析
+            </button>
+
+        </div>
+
+
+        <h3 class="sub-title">
+            示範案例分析流程
+        </h3>
+
+
+        <div class="formula">
+
+DEMO CASE
+   │
+   ├── Nodes
+   │
+   ├── Pipes
+   │
+   ├── Design Flow
+   │
+   ├── Hydraulic Network Solver
+   │
+   ├── Manning Partial Flow
+   │
+   ├── Full Pipe Switching
+   │
+   ├── HGL / EGL
+   │
+   ├── Friction Loss
+   │
+   ├── Local Loss
+   │
+   ├── Backwater
+   │
+   ├── Engineering Checking
+   │
+   └── Longitudinal Profile
+
+        </div>
+
+    </section>
+
+
+    <!-- ========================================================
+         TAB 8 — Export
+         ======================================================== -->
+
+    <section
+        class="tab-content"
+        id="tab-export"
+    >
+
+        <h2 class="section-title">
+            計算成果匯出
+        </h2>
+
+
+        <div class="info-box">
+
+            匯出內容以目前
+            <code>window.v3HydraulicSolution</code>、
+            <code>window.v3HglEglSolution</code>
+            及工程檢核結果為資料來源。
+
+        </div>
+
+
+        <div class="grid-3">
+
+            <div class="panel">
+
+                <h3>
+                    水理成果
+                </h3>
+
+                <p>
+                    管段流量、水深、流速、面積、
+                    水力半徑、Froude number。
+                </p>
+
+                <button
+                    class="btn btn-primary"
+                    id="exportHydraulicCsvBtn"
+                >
+                    匯出 Hydraulic CSV
+                </button>
+
+            </div>
+
+
+            <div class="panel">
+
+                <h3>
+                    HGL / EGL
+                </h3>
+
+                <p>
+                    管底、HGL、EGL、摩阻損失、
+                    局部損失及回水。
+                </p>
+
+                <button
+                    class="btn btn-primary"
+                    id="exportHglCsvBtn"
+                >
+                    匯出 HGL/EGL CSV
+                </button>
+
+            </div>
+
+
+            <div class="panel">
+
+                <h3>
+                    Excel
+                </h3>
+
+                <p>
+                    將水理、HGL/EGL 及檢核成果
+                    匯整為 Excel 工作簿。
+                </p>
+
+                <button
+                    class="btn btn-success"
+                    id="exportExcelBtn"
+                >
+                    匯出 Excel
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <h3 class="sub-title">
+            系統資料
+        </h3>
+
+
+        <div class="button-row">
+
+            <button
+                class="btn btn-secondary"
+                id="exportJsonBtn"
+            >
+                匯出完整 JSON
+            </button>
+
+            <button
+                class="btn btn-light"
+                id="printResultBtn"
+            >
+                列印成果
+            </button>
+
+        </div>
+
+    </section>
 
 </main>
 
 
+<!-- ============================================================
+     Footer
+     ============================================================ -->
+
 <footer>
 
-台灣雨水下水道數值水理分析 V3
-<br>
-創建者：HHHuang
+    <div>
+        台灣雨水下水道數值水理分析 V3
+    </div>
+
+    <div>
+        創建者：HHHuang
+    </div>
+
+    <div>
+        本系統計算結果應配合最新法規、設計指南及工程專業判斷使用。
+    </div>
 
 </footer>
 
 
-<script src="js/model.js"></script>
-<script src="js/geometry.js"></script>
-<script src="js/hydrology.js"></script>
-<script src="js/network.js"></script>
-<script src="js/solver.js"></script>
+<!-- ============================================================
+     Application Scripts
+     ============================================================ -->
+
 <script src="js/hydraulic.js"></script>
+
+<script src="js/hgl-egl.js"></script>
+
 <script src="js/checking.js"></script>
-<script src="js/profile.js"></script>
+
 <script src="js/export.js"></script>
+
 <script src="js/app.js"></script>
 
-</body>
 
+<!-- ============================================================
+     Page-level fallback / integration
+     ============================================================ -->
+
+<script>
+
+(function () {
+
+    "use strict";
+
+
+    /* =========================================================
+       Tab system
+       ========================================================= */
+
+    document
+        .querySelectorAll(".tab-button")
+        .forEach(function (button) {
+
+            button.addEventListener(
+                "click",
+                function () {
+
+                    const target =
+                        this.dataset.tab;
+
+
+                    document
+                        .querySelectorAll(
+                            ".tab-button"
+                        )
+                        .forEach(function (btn) {
+
+                            btn.classList.remove(
+                                "active"
+                            );
+
+                        });
+
+
+                    document
+                        .querySelectorAll(
+                            ".tab-content"
+                        )
+                        .forEach(function (panel) {
+
+                            panel.classList.remove(
+                                "active"
+                            );
+
+                        });
+
+
+                    this.classList.add(
+                        "active"
+                    );
+
+
+                    const panel =
+                        document.getElementById(
+                            target
+                        );
+
+
+                    if (panel) {
+
+                        panel.classList.add(
+                            "active"
+                        );
+
+                    }
+
+                }
+            );
+
+        });
+
+
+    /* =========================================================
+       Safe element helper
+       ========================================================= */
+
+    window.v3SetText =
+        function (id, value) {
+
+            const el =
+                document.getElementById(id);
+
+
+            if (el) {
+
+                el.textContent =
+                    value;
+
+            }
+
+        };
+
+
+    /* =========================================================
+       Update global status
+       ========================================================= */
+
+    window.v3UpdateStatus =
+        function () {
+
+            const solution =
+                window.v3HydraulicSolution;
+
+
+            if (!solution) {
+
+                return;
+
+            }
+
+
+            const pipeResults =
+                Array.isArray(
+                    solution.pipeResults
+                )
+                    ? solution.pipeResults
+                    : [];
+
+
+            window.v3SetText(
+                "pipeCount",
+                pipeResults.length
+            );
+
+
+            const nodes =
+                Array.isArray(
+                    window.nodes
+                )
+                    ? window.nodes
+                    : (
+                        Array.isArray(
+                            solution.nodes
+                        )
+                            ? solution.nodes
+                            : []
+                    );
+
+
+            window.v3SetText(
+                "nodeCount",
+                nodes.length
+            );
+
+
+            const converged =
+                solution.converged === true ||
+                solution.success === true;
+
+
+            window.v3SetText(
+                "solverStatus",
+                converged
+                    ? "✓ 已收斂"
+                    : "已計算／請檢查"
+            );
+
+        };
+
+
+    /* =========================================================
+       HGL update
+       ========================================================= */
+
+    window.v3UpdateHglSummary =
+        function () {
+
+            const result =
+                window.v3HglEglSolution;
+
+
+            if (!result) {
+
+                return;
+
+            }
+
+
+            const stats =
+                result.statistics ||
+                {};
+
+
+            window.v3SetText(
+                "hglMax",
+                Number.isFinite(
+                    stats.maxHGL
+                )
+                    ? stats.maxHGL.toFixed(3)
+                    : "-"
+            );
+
+
+            window.v3SetText(
+                "eglMax",
+                Number.isFinite(
+                    stats.maxEGL
+                )
+                    ? stats.maxEGL.toFixed(3)
+                    : "-"
+            );
+
+
+            window.v3SetText(
+                "backwaterMax",
+                Number.isFinite(
+                    stats.maxBackwater
+                )
+                    ? stats.maxBackwater.toFixed(3)
+                    : "-"
+            );
+
+
+            window.v3SetText(
+                "summaryHGL",
+                Number.isFinite(
+                    stats.maxHGL
+                )
+                    ? stats.maxHGL.toFixed(3) +
+                      " m"
+                    : "-"
+            );
+
+
+            window.v3SetText(
+                "summaryEGL",
+                Number.isFinite(
+                    stats.maxEGL
+                )
+                    ? stats.maxEGL.toFixed(3) +
+                      " m"
+                    : "-"
+            );
+
+        };
+
+
+    /* =========================================================
+       Draw HGL helper
+       ========================================================= */
+
+    window.v3DrawHglProfile =
+        function () {
+
+            if (
+                !window.V3HglEgl
+            ) {
+
+                alert(
+                    "找不到 hgl-egl.js。"
+                );
+
+                return;
+
+            }
+
+
+            try {
+
+                const result =
+                    window.V3HglEgl.calculate();
+
+
+                window.v3UpdateHglSummary();
+
+
+                window.V3HglEgl.drawProfile(
+                    result,
+                    "hydraulicProfileChart"
+                );
+
+
+                const button =
+                    document.querySelector(
+                        '[data-tab="tab-hgl"]'
+                    );
+
+
+                if (button) {
+
+                    button.click();
+
+                }
+
+            }
+            catch (error) {
+
+                console.error(
+                    error
+                );
+
+
+                alert(
+                    "HGL/EGL 計算失敗：\n" +
+                    error.message
+                );
+
+            }
+
+        };
+
+
+    /* =========================================================
+       HGL button fallback
+       ========================================================= */
+
+    const hglButton =
+        document.getElementById(
+            "calculateHglBtn"
+        );
+
+
+    if (hglButton) {
+
+        hglButton.addEventListener(
+            "click",
+            window.v3DrawHglProfile
+        );
+
+    }
+
+
+    const drawButton =
+        document.getElementById(
+            "drawProfileBtn"
+        );
+
+
+    if (drawButton) {
+
+        drawButton.addEventListener(
+            "click",
+            window.v3DrawHglProfile
+        );
+
+    }
+
+
+    /* =========================================================
+       Initial status
+       ========================================================= */
+
+    window.v3UpdateStatus();
+
+
+})();
+
+</script>
+
+</body>
 </html>
