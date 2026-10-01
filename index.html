@@ -926,6 +926,13 @@
 
         }
 
+
+        @media print {
+            .tabs, .button-row, header, .status-bar, #v3Message { display: none !important; }
+            .tab-content { display: block !important; box-shadow: none; page-break-inside: avoid; }
+            body { background: white; }
+        }
+
     </style>
 </head>
 
@@ -2448,7 +2455,7 @@ DEMO CASE
 
 <script src="js/export.js"></script>
 
-<script src="js/app.js"></script>
+<script src="js/ui.js"></script>
 
 
 <!-- ============================================================
@@ -2757,42 +2764,6 @@ DEMO CASE
             }
 
         };
-
-
-    /* =========================================================
-       HGL button fallback
-       ========================================================= */
-
-    const hglButton =
-        document.getElementById(
-            "calculateHglBtn"
-        );
-
-
-    if (hglButton) {
-
-        hglButton.addEventListener(
-            "click",
-            window.v3DrawHglProfile
-        );
-
-    }
-
-
-    const drawButton =
-        document.getElementById(
-            "drawProfileBtn"
-        );
-
-
-    if (drawButton) {
-
-        drawButton.addEventListener(
-            "click",
-            window.v3DrawHglProfile
-        );
-
-    }
 
 
     /* =========================================================
