@@ -1,47 +1,126 @@
 /*
- * ============================================================
- * 台灣雨水下水道數值水理分析 V3
- * js/hydraulic.js
+ * ================================================================
+ * hydraulic.js
+ * 台灣雨水下水道數值水理分析 V3.1
  *
- * 功能：
- * 1. Manning 非滿流水理
- * 2. 圓管部分充滿幾何計算
- * 3. 滿管流量
- * 4. 正常水深迭代
- * 5. 臨界水深迭代
- * 6. 管段水理狀態判斷
- * 7. 管網流量基本計算
+ * ------------------------------------------------
+ * 核心：
+ *
+ *   節點連續方程
+ *       ΣQin + Qlocal - ΣQout = 0
+ *
+ *   管段 Manning：
+ *
+ *       Q = (1/n) A R^(2/3) S_f^(1/2)
+ *
+ *   非滿流：
+ *       y < D
+ *
+ *   滿管：
+ *       y >= D
+ *
+ *   壓力 / surcharge：
+ *       Q > Qfull 時進入滿管 / 超載狀態
+ *
+ *   匯流：
+ *       多支 incoming pipes
+ *       →
+ *       同一節點
+ *       →
+ *       continuity balance
+ *
+ * ------------------------------------------------
+ *
+ * 本版本定位：
+ *
+ *   Steady / quasi-steady network solver
+ *
+ * 並非完整 Saint-Venant dynamic wave solver。
+ *
+ * V4 可進一步加入：
+ *
+ *   ∂A/∂t + ∂Q/∂x = q
+ *   ∂Q/∂t + ∂(Q²/A)/∂x
+ *       + gA ∂H/∂x
+ *       = gA(S0-Sf)
+ *
+ * ------------------------------------------------
  *
  * 單位：
- * 長度   m
- * 面積   m2
- * 流量   m3/s
- * 流速   m/s
- * 高程   m
- * 粗糙係數 n 無因次
- * ============================================================
+ *
+ *   Q       m3/s
+ *   length  m
+ *   D       m
+ *   y       m
+ *   H       m
+ *   V       m/s
+ *   slope   dimensionless
+ *
+ * ================================================================
  */
 
-"use strict";
 
-const V3_HYDRAULIC = {
+/* ================================================================
+ * 0. 全域設定
+ * ================================================================ */
 
-    G: 9.81,
+const V3_HYDRAULIC_CONFIG = {
 
-    TOLERANCE: 1e-7,
+    g:
+        9.80665,
 
-    MAX_ITERATIONS: 200
+    defaultN:
+        0.013,
 
+    minimumDepth:
+        0.0001,
+
+    minimumSlope:
+        0.000001,
+
+    flowTolerance:
+        0.00001,
+
+    nodeBalanceTolerance:
+        0.0001,
+
+    headTolerance:
+        0.001,
+
+    maxNetworkIterations:
+        500,
+
+    maxDepthIterations:
+        100,
+
+    relaxation:
+        0.55,
+
+    headRelaxation:
+        0.45,
+
+    maxFlowChange:
+        0.02,
+
+    fullPipeRatio:
+        0.98,
+
+    surchargeTolerance:
+        0.001
 };
 
 
-/* ============================================================
- * 基本工具
- * ============================================================ */
+/* ================================================================
+ * 1. 基本工具
+ * ================================================================ */
 
-function hNum(value, fallback = 0) {
+function hydNum(
+    value,
+    fallback = 0
+) {
 
-    const n = Number(value);
+    const n =
+        Number(value);
 
     return Number.isFinite(n)
         ? n
@@ -49,172 +128,290 @@ function hNum(value, fallback = 0) {
 }
 
 
-function hClamp(value, min, max) {
+function hydFinite(
+    value
+) {
 
-    return Math.max(
-        min,
-        Math.min(max, value)
+    return Number.isFinite(
+        Number(value)
     );
 }
 
 
-/* ============================================================
- * 圓管幾何
- *
- * theta：
- * 水面所對應的圓心角，0 ~ 2π
- *
- * theta = 2π：
- * 滿管
- * ============================================================ */
-
-function circularGeometry(
-    diameter,
-    depth
+function hydClamp(
+    value,
+    min,
+    max
 ) {
 
-    const D = hNum(diameter);
-    const y = hNum(depth);
+    return Math.max(
+        min,
+        Math.min(
+            max,
+            value
+        )
+    );
+}
+
+
+function hydSign(
+    value
+) {
+
+    return value >= 0
+        ? 1
+        : -1;
+}
+
+
+/* ================================================================
+ * 2. 管段幾何
+ * ================================================================ */
+
+/**
+ * 圓管面積
+ */
+function circularArea(
+    diameter
+) {
+
+    const D =
+        hydNum(
+            diameter
+        );
+
+    if (D <= 0) {
+        return 0;
+    }
+
+    return (
+        Math.PI *
+        D *
+        D /
+        4
+    );
+}
+
+
+/**
+ * 圓管滿管周長
+ */
+function circularFullPerimeter(
+    diameter
+) {
+
+    const D =
+        hydNum(
+            diameter
+        );
+
+    return D > 0
+        ? Math.PI * D
+        : 0;
+}
+
+
+/**
+ * 圓管部分充滿幾何
+ *
+ * y < D
+ */
+function circularGeometry(
+    depth,
+    diameter
+) {
+
+    const D =
+        hydNum(
+            diameter
+        );
 
     if (D <= 0) {
 
         return {
 
-            theta: 0,
             area: 0,
-            wettedPerimeter: 0,
-            hydraulicRadius: 0,
-            topWidth: 0
 
+            perimeter: 0,
+
+            hydraulicRadius: 0,
+
+            topWidth: 0,
+
+            depth: 0,
+
+            full: false
         };
     }
 
-    const R = D / 2;
 
-    const depthClamped =
-        hClamp(
-            y,
+    const y =
+        hydClamp(
+            hydNum(depth),
             0,
             D
         );
 
 
-    /* 水深為 0 */
+    /*
+     * 空管
+     */
 
-    if (depthClamped <= 0) {
+    if (y <= 0) {
 
         return {
 
-            theta: 0,
             area: 0,
-            wettedPerimeter: 0,
+
+            perimeter: 0,
+
             hydraulicRadius: 0,
-            topWidth: 0
 
-        };
-    }
+            topWidth: 0,
 
+            depth: 0,
 
-    /* 滿管 */
-
-    if (depthClamped >= D) {
-
-        const area =
-            Math.PI * R * R;
-
-        const wettedPerimeter =
-            2 * Math.PI * R;
-
-        return {
-
-            theta:
-                2 * Math.PI,
-
-            area,
-
-            wettedPerimeter,
-
-            hydraulicRadius:
-                area /
-                wettedPerimeter,
-
-            topWidth:
-                D
-
+            full: false
         };
     }
 
 
     /*
-     * 圓管部分充滿：
-     *
-     * alpha = acos((R-y)/R)
-     *
-     * theta = 2 alpha
+     * 滿管
      */
 
-    const alpha =
+    if (
+        y >= D
+    ) {
+
+        const A =
+            circularArea(D);
+
+        const P =
+            circularFullPerimeter(D);
+
+        return {
+
+            area:
+                A,
+
+            perimeter:
+                P,
+
+            hydraulicRadius:
+                A / P,
+
+            topWidth:
+                D,
+
+            depth:
+                D,
+
+            full:
+                true
+        };
+    }
+
+
+    const R =
+        D / 2;
+
+
+    /*
+     * 中心角：
+     *
+     * theta =
+     * 2 acos(1 - y/R)
+     */
+
+    const theta =
+        2 *
         Math.acos(
-            hClamp(
-                (R - depthClamped) / R,
+            hydClamp(
+                1 -
+                y / R,
                 -1,
                 1
             )
         );
 
-    const theta =
-        2 * alpha;
 
+    /*
+     * 面積
+     */
 
-    const area =
-        0.5 *
-        R *
-        R *
+    const A =
+        (
+            R * R /
+            2
+        ) *
         (
             theta -
             Math.sin(theta)
         );
 
 
-    const wettedPerimeter =
+    /*
+     * 濕周
+     */
+
+    const P =
         R * theta;
 
 
-    const hydraulicRadius =
-        wettedPerimeter > 0
-            ? area / wettedPerimeter
-            : 0;
+    /*
+     * 水面寬
+     */
 
-
-    const topWidth =
+    const T =
         2 *
-        R *
-        Math.sin(alpha);
+        Math.sqrt(
+            Math.max(
+                0,
+                R * R -
+                Math.pow(
+                    R - y,
+                    2
+                )
+            )
+        );
 
 
     return {
 
-        theta,
+        area:
+            A,
 
-        area,
+        perimeter:
+            P,
 
-        wettedPerimeter,
+        hydraulicRadius:
+            P > 0
+                ? A / P
+                : 0,
 
-        hydraulicRadius,
+        topWidth:
+            T,
 
-        topWidth
+        depth:
+            y,
 
+        full:
+            false
     };
 }
 
 
-/* ============================================================
- * Manning
- *
- * Q = (1/n) A R^(2/3) S^(1/2)
- * ============================================================ */
+/* ================================================================
+ * 3. Manning
+ * ================================================================ */
 
-function manningDischarge(
+/**
+ * Manning：
+ *
+ * Q = 1/n A R^(2/3) S^(1/2)
+ */
+function manningQ(
     area,
     hydraulicRadius,
     slope,
@@ -222,23 +419,28 @@ function manningDischarge(
 ) {
 
     const A =
-        hNum(area);
+        hydNum(area);
 
     const R =
-        hNum(hydraulicRadius);
+        hydNum(
+            hydraulicRadius
+        );
 
     const S =
-        hNum(slope);
+        hydNum(slope);
 
-    const roughness =
-        hNum(n);
+    const N =
+        hydNum(
+            n,
+            V3_HYDRAULIC_CONFIG.defaultN
+        );
 
 
     if (
         A <= 0 ||
         R <= 0 ||
         S <= 0 ||
-        roughness <= 0
+        N <= 0
     ) {
 
         return 0;
@@ -246,7 +448,7 @@ function manningDischarge(
 
 
     return (
-        (1 / roughness) *
+        1 / N *
         A *
         Math.pow(
             R,
@@ -257,491 +459,490 @@ function manningDischarge(
 }
 
 
-/* ============================================================
- * Manning 流速
- * ============================================================ */
-
+/**
+ * Manning velocity
+ */
 function manningVelocity(
-    area,
-    hydraulicRadius,
-    slope,
-    n
+    Q,
+    area
 ) {
 
-    const Q =
-        manningDischarge(
-            area,
-            hydraulicRadius,
-            slope,
-            n
-        );
+    const A =
+        hydNum(area);
 
-
-    if (area <= 0) {
+    if (A <= 0) {
         return 0;
     }
 
-
-    return Q / area;
+    return (
+        Q / A
+    );
 }
 
 
-/* ============================================================
- * 依管徑求滿管 Manning 流量
- * ============================================================ */
-
+/**
+ * 滿管容量
+ */
 function fullPipeCapacity(
-    diameter,
-    slope,
-    n
+    pipe
 ) {
 
-    const geometry =
-        circularGeometry(
-            diameter,
-            diameter
+    const D =
+        getPipeDiameter(
+            pipe
+        );
+
+    const S =
+        getPipeSlope(
+            pipe
+        );
+
+    const n =
+        getPipeManningN(
+            pipe
         );
 
 
-    return manningDischarge(
-        geometry.area,
-        geometry.hydraulicRadius,
-        slope,
+    const A =
+        circularArea(D);
+
+    const R =
+        D / 4;
+
+
+    return manningQ(
+        A,
+        R,
+        S,
         n
     );
 }
 
 
-/* ============================================================
- * 正常水深方程
- *
- * f(y) = ManningQ(y) - Qtarget
- * ============================================================ */
+/* ================================================================
+ * 4. 管段資料取得
+ * ================================================================ */
 
-function solveNormalDepth(
-    diameter,
-    slope,
-    n,
-    Q
+function getPipeDiameter(
+    pipe
 ) {
 
-    const D =
-        hNum(diameter);
-
-    const S =
-        hNum(slope);
-
-    const roughness =
-        hNum(n);
-
-    const targetQ =
-        Math.abs(
-            hNum(Q)
-        );
+    return hydNum(
+        pipe?.diameter ??
+        pipe?.D ??
+        pipe?.pipeDiameter
+    );
+}
 
 
-    if (
-        D <= 0 ||
-        S <= 0 ||
-        roughness <= 0
-    ) {
+function getPipeLength(
+    pipe
+) {
 
-        return {
-
-            depth: 0,
-
-            velocity: 0,
-
-            area: 0,
-
-            hydraulicRadius: 0,
-
-            topWidth: 0,
-
-            discharge: 0,
-
-            fullFlow: 0,
-
-            ratio: 0,
-
-            status:
-                "INVALID_INPUT",
-
-            iterations: 0
-
-        };
-    }
+    return hydNum(
+        pipe?.length ??
+        pipe?.L
+    );
+}
 
 
-    const fullQ =
-        fullPipeCapacity(
-            D,
-            S,
-            roughness
+function getPipeSlope(
+    pipe
+) {
+
+    let S =
+        hydNum(
+            pipe?.slope ??
+            pipe?.S
         );
 
 
     /*
-     * 流量大於滿管能力：
-     *
-     * 這裡不直接把水深設成 > D。
-     * V3 後續應交給壓力流模組。
+     * 如果沒有直接輸入坡度，
+     * 嘗試由上下游管底反算。
+     */
+
+    if (
+        S === 0 &&
+        typeof nodes !==
+        "undefined"
+    ) {
+
+        const from =
+            findNodeById(
+                pipe.from
+            );
+
+        const to =
+            findNodeById(
+                pipe.to
+            );
+
+
+        if (
+            from &&
+            to &&
+            getPipeLength(pipe) > 0
+        ) {
+
+            S =
+                (
+                    hydNum(
+                        from.invert
+                    ) -
+                    hydNum(
+                        to.invert
+                    )
+                ) /
+                getPipeLength(
+                    pipe
+                );
+        }
+    }
+
+
+    return S;
+}
+
+
+function getPipeManningN(
+    pipe
+) {
+
+    return hydNum(
+        pipe?.n ??
+        pipe?.manningN,
+        V3_HYDRAULIC_CONFIG.defaultN
+    );
+}
+
+
+function findNodeById(
+    id
+) {
+
+    if (
+        typeof nodes ===
+        "undefined" ||
+        !Array.isArray(nodes)
+    ) {
+
+        return null;
+    }
+
+
+    return nodes.find(
+        node =>
+            String(
+                node.id
+            ) ===
+            String(id)
+    ) || null;
+}
+
+
+function findPipeById(
+    id
+) {
+
+    if (
+        typeof pipes ===
+        "undefined" ||
+        !Array.isArray(pipes)
+    ) {
+
+        return null;
+    }
+
+
+    return pipes.find(
+        pipe =>
+            String(
+                pipe.id
+            ) ===
+            String(id)
+    ) || null;
+}
+
+
+/* ================================================================
+ * 5. 正常水深
+ * ================================================================ */
+
+/**
+ * 由 Q 求正常水深
+ *
+ * Q(y) = Qtarget
+ */
+function solveNormalDepth(
+    Q,
+    pipe
+) {
+
+    const targetQ =
+        Math.abs(
+            hydNum(Q)
+        );
+
+
+    const D =
+        getPipeDiameter(
+            pipe
+        );
+
+    const S =
+        Math.abs(
+            getPipeSlope(
+                pipe
+            )
+        );
+
+    const n =
+        getPipeManningN(
+            pipe
+        );
+
+
+    if (
+        targetQ <=
+        V3_HYDRAULIC_CONFIG.flowTolerance
+    ) {
+
+        return {
+
+            depth:
+                0,
+
+            area:
+                0,
+
+            hydraulicRadius:
+                0,
+
+            topWidth:
+                0,
+
+            velocity:
+                0,
+
+            froude:
+                0,
+
+            regime:
+                "dry",
+
+            full:
+                false,
+
+            capacity:
+                fullPipeCapacity(
+                    pipe
+                )
+        };
+    }
+
+
+    if (
+        D <= 0
+    ) {
+
+        return {
+
+            depth:
+                0,
+
+            area:
+                0,
+
+            hydraulicRadius:
+                0,
+
+            topWidth:
+                0,
+
+            velocity:
+                0,
+
+            froude:
+                0,
+
+            regime:
+                "invalid",
+
+            full:
+                false,
+
+            capacity:
+                0
+        };
+    }
+
+
+    const Qfull =
+        fullPipeCapacity(
+            pipe
+        );
+
+
+    /*
+     * ------------------------------------------------------------
+     * 滿管切換
+     * ------------------------------------------------------------
      */
 
     if (
         targetQ >=
-        fullQ * 0.999999
+        Qfull
     ) {
 
-        const geometry =
-            circularGeometry(
-                D,
+        const A =
+            circularArea(
                 D
             );
 
 
-        const velocity =
-            geometry.area > 0
-                ? targetQ /
-                  geometry.area
-                : 0;
+        const V =
+            targetQ /
+            A;
 
 
         return {
 
-            depth: D,
-
-            velocity,
+            depth:
+                D,
 
             area:
-                geometry.area,
+                A,
 
             hydraulicRadius:
-                geometry.hydraulicRadius,
+                D / 4,
 
             topWidth:
-                geometry.topWidth,
+                D,
 
-            discharge:
-                fullQ,
+            velocity:
+                V,
 
-            requestedDischarge:
-                targetQ,
+            froude:
+                calculateFroude(
+                    V,
+                    A,
+                    D
+                ),
 
-            fullFlow:
-                fullQ,
+            regime:
+                "full",
 
-            ratio:
-                fullQ > 0
-                    ? targetQ / fullQ
-                    : Infinity,
+            full:
+                true,
 
-            status:
-                targetQ > fullQ
-                    ? "PRESSURE_FLOW_REQUIRED"
-                    : "FULL_FLOW",
+            surcharge:
+                targetQ >
+                Qfull,
 
-            iterations: 0
-
+            capacity:
+                Qfull
         };
     }
 
 
     /*
-     * 二分法：
-     *
-     * 0 < y < D
+     * ------------------------------------------------------------
+     * 非滿流二分法
+     * ------------------------------------------------------------
      */
 
     let low =
-        Math.max(
-            D * 1e-8,
-            1e-9
-        );
+        V3_HYDRAULIC_CONFIG.minimumDepth;
+
 
     let high =
-        D *
-        (
-            1 -
-            1e-8
-        );
+        D -
+        V3_HYDRAULIC_CONFIG.minimumDepth;
 
 
     let mid =
-        (low + high) / 2;
-
-    let iterations = 0;
-
-
-    for (
-        iterations = 1;
-        iterations <=
-        V3_HYDRAULIC.MAX_ITERATIONS;
-        iterations++
-    ) {
-
-        mid =
-            (low + high) / 2;
-
-
-        const geometry =
-            circularGeometry(
-                D,
-                mid
-            );
-
-
-        const q =
-            manningDischarge(
-                geometry.area,
-                geometry.hydraulicRadius,
-                S,
-                roughness
-            );
-
-
-        if (
-            Math.abs(
-                q - targetQ
-            )
-            <
-            V3_HYDRAULIC.TOLERANCE
-        ) {
-
-            break;
-        }
-
-
-        if (q < targetQ) {
-
-            low = mid;
-
-        } else {
-
-            high = mid;
-        }
-    }
-
-
-    const geometry =
-        circularGeometry(
-            D,
-            mid
-        );
-
-
-    const discharge =
-        manningDischarge(
-            geometry.area,
-            geometry.hydraulicRadius,
-            S,
-            roughness
-        );
-
-
-    const velocity =
-        geometry.area > 0
-            ? targetQ /
-              geometry.area
-            : 0;
-
-
-    return {
-
-        depth:
-            mid,
-
-        velocity,
-
-        area:
-            geometry.area,
-
-        hydraulicRadius:
-            geometry.hydraulicRadius,
-
-        topWidth:
-            geometry.topWidth,
-
-        discharge,
-
-        requestedDischarge:
-            targetQ,
-
-        fullFlow:
-            fullQ,
-
-        ratio:
-            fullQ > 0
-                ? targetQ / fullQ
-                : 0,
-
-        status:
-            "NORMAL_FLOW",
-
-        iterations
-    };
-}
-
-
-/* ============================================================
- * 臨界水深
- *
- * Fr = 1
- *
- * Q² T / (g A³) = 1
- *
- * ============================================================ */
-
-function solveCriticalDepth(
-    diameter,
-    Q
-) {
-
-    const D =
-        hNum(diameter);
-
-    const targetQ =
-        Math.abs(
-            hNum(Q)
-        );
-
-
-    if (
-        D <= 0 ||
-        targetQ <= 0
-    ) {
-
-        return {
-
-            depth: 0,
-
-            froude: 0,
-
-            status:
-                "INVALID_INPUT"
-
-        };
-    }
-
-
-    let low =
-        Math.max(
-            D * 1e-8,
-            1e-8
-        );
-
-    let high =
-        D *
-        (
-            1 -
-            1e-8
-        );
-
-
-    let mid =
-        (low + high) / 2;
+        D * 0.5;
 
 
     for (
         let i = 0;
-        i < V3_HYDRAULIC.MAX_ITERATIONS;
+        i <
+        V3_HYDRAULIC_CONFIG.maxDepthIterations;
         i++
     ) {
 
         mid =
-            (low + high) / 2;
+            (
+                low +
+                high
+            ) / 2;
 
 
-        const geometry =
+        const geom =
             circularGeometry(
-                D,
-                mid
+                mid,
+                D
             );
 
 
-        const A =
-            geometry.area;
-
-        const T =
-            geometry.topWidth;
-
-
-        if (
-            A <= 0 ||
-            T <= 0
-        ) {
-
-            low = mid;
-
-            continue;
-        }
-
-
-        const residual =
-            (
-                targetQ *
-                targetQ *
-                T
-            ) /
-            (
-                V3_HYDRAULIC.G *
-                Math.pow(A, 3)
-            )
-            - 1;
+        const q =
+            manningQ(
+                geom.area,
+                geom.hydraulicRadius,
+                S,
+                n
+            );
 
 
         if (
-            Math.abs(residual)
-            <
-            1e-8
+            Math.abs(
+                q -
+                targetQ
+            ) <=
+            V3_HYDRAULIC_CONFIG.flowTolerance
         ) {
 
             break;
         }
 
 
-        /*
-         * 水深增加：
-         * A 增加，Fr² 降低。
-         */
+        if (
+            q <
+            targetQ
+        ) {
 
-        if (residual > 0) {
-
-            low = mid;
+            low =
+                mid;
 
         } else {
 
-            high = mid;
+            high =
+                mid;
         }
     }
 
 
-    const geometry =
+    const geom =
         circularGeometry(
-            D,
-            mid
+            mid,
+            D
         );
 
 
-    const velocity =
-        geometry.area > 0
+    const V =
+        geom.area > 0
             ? targetQ /
-              geometry.area
+              geom.area
             : 0;
 
 
-    const froude =
-        geometry.topWidth > 0 &&
-        geometry.area > 0
-
-            ? velocity /
-              Math.sqrt(
-                  V3_HYDRAULIC.G *
-                  geometry.area /
-                  geometry.topWidth
-              )
-
-            : 0;
+    const Fr =
+        calculateFroude(
+            V,
+            geom.area,
+            geom.topWidth
+        );
 
 
     return {
@@ -749,98 +950,106 @@ function solveCriticalDepth(
         depth:
             mid,
 
-        velocity,
-
         area:
-            geometry.area,
+            geom.area,
 
         hydraulicRadius:
-            geometry.hydraulicRadius,
+            geom.hydraulicRadius,
 
         topWidth:
-            geometry.topWidth,
+            geom.topWidth,
 
-        froude,
+        velocity:
+            V,
 
-        status:
-            Math.abs(
-                froude - 1
-            ) < 0.01
+        froude:
+            Fr,
 
-                ? "CRITICAL"
-                : "CALCULATED"
+        regime:
+            Fr < 1
+                ? "subcritical"
+                : Fr > 1
+                    ? "supercritical"
+                    : "critical",
 
+        full:
+            false,
+
+        surcharge:
+            false,
+
+        capacity:
+            Qfull
     };
 }
 
 
-/* ============================================================
- * 管段水理分析
- * ============================================================ */
+/* ================================================================
+ * 6. Froude
+ * ================================================================ */
 
-function analyzePipeHydraulics(
+function calculateFroude(
+    velocity,
+    area,
+    topWidth
+) {
+
+    const V =
+        Math.abs(
+            hydNum(velocity)
+        );
+
+    const A =
+        hydNum(area);
+
+    const T =
+        hydNum(topWidth);
+
+
+    if (
+        A <= 0 ||
+        T <= 0
+    ) {
+
+        return 0;
+    }
+
+
+    const hydraulicDepth =
+        A / T;
+
+
+    return (
+        V /
+        Math.sqrt(
+            V3_HYDRAULIC_CONFIG.g *
+            hydraulicDepth
+        )
+    );
+}
+
+
+/* ================================================================
+ * 7. 單一管段 hydraulic state
+ * ================================================================ */
+
+function calculatePipeHydraulics(
     pipe,
     Q
 ) {
 
-    const diameter =
-        hNum(
-            pipe.diameter
-        );
-
-    const slope =
-        hNum(
-            pipe.slope
-        );
-
-    const n =
-        hNum(
-            pipe.n,
-            0.013
-        );
-
-    const length =
-        hNum(
-            pipe.length
-        );
+    const flow =
+        hydNum(Q);
 
 
-    const result =
+    const depth =
         solveNormalDepth(
-            diameter,
-            slope,
-            n,
-            Q
+            flow,
+            pipe
         );
 
 
-    const critical =
-        solveCriticalDepth(
-            diameter,
-            Q
-        );
-
-
-    let regime =
-        "SUBCRITICAL";
-
-
-    if (
-        result.velocity >
-        0 &&
-        critical.depth >
-        0
-    ) {
-
-        regime =
-            result.depth >
-            critical.depth
-                ? "SUBCRITICAL"
-                : "SUPERCRITICAL";
-    }
-
-
-    return {
+    const result = {
 
         pipeId:
             pipe.id,
@@ -851,266 +1060,1186 @@ function analyzePipeHydraulics(
         to:
             pipe.to,
 
-        length,
-
-        diameter,
-
-        slope,
-
-        n,
-
         Q:
-            Math.abs(Q),
+            flow,
+
+        Qabs:
+            Math.abs(flow),
+
+        direction:
+            hydSign(flow),
+
+        length:
+            getPipeLength(
+                pipe
+            ),
+
+        diameter:
+            getPipeDiameter(
+                pipe
+            ),
+
+        slope:
+            getPipeSlope(
+                pipe
+            ),
+
+        n:
+            getPipeManningN(
+                pipe
+            ),
 
         depth:
-            result.depth,
+            depth.depth,
 
         area:
-            result.area,
+            depth.area,
 
         hydraulicRadius:
-            result.hydraulicRadius,
+            depth.hydraulicRadius,
 
         topWidth:
-            result.topWidth,
+            depth.topWidth,
 
         velocity:
-            result.velocity,
-
-        fullFlow:
-            result.fullFlow,
-
-        capacityRatio:
-            result.fullFlow > 0
-                ? Math.abs(Q) /
-                  result.fullFlow
-                : Infinity,
-
-        criticalDepth:
-            critical.depth,
+            depth.velocity,
 
         froude:
-            critical.froude,
+            depth.froude,
 
-        regime,
+        regime:
+            depth.regime,
 
-        status:
-            result.status,
+        full:
+            depth.full,
 
-        iterations:
-            result.iterations,
+        surcharge:
+            depth.surcharge || false,
 
-        fullFlowRequired:
-            result.status ===
-            "PRESSURE_FLOW_REQUIRED"
+        Qfull:
+            depth.capacity
     };
+
+
+    return result;
 }
 
 
-/* ============================================================
- * 節點入流累積
- *
- * 假設 flowIn 已經由 Rational Method 或其他模組
- * 建立於節點上。
- * ============================================================ */
+/* ================================================================
+ * 8. 節點外加流量
+ * ================================================================ */
 
-function calculateNetworkFlows(
-    nodeList,
-    pipeList
+function getNodeExternalInflow(
+    node
 ) {
 
-    const nodeFlow =
-        {};
+    if (!node) {
+        return 0;
+    }
 
 
-    nodeList.forEach(
-        node => {
+    /*
+     * 支援多種欄位名稱
+     */
 
-            nodeFlow[node.id] =
-                hNum(
-                    node.designFlow,
-                    0
+    const candidates = [
+
+        node.inflow,
+
+        node.externalInflow,
+
+        node.localInflow,
+
+        node.runoff,
+
+        node.designFlow,
+
+        node.Qin,
+
+        node.Q
+    ];
+
+
+    for (
+        const value of candidates
+    ) {
+
+        if (
+            hydFinite(value)
+        ) {
+
+            return hydNum(value);
+        }
+    }
+
+
+    return 0;
+}
+
+
+/* ================================================================
+ * 9. 節點出流 / 入流
+ * ================================================================ */
+
+function getIncomingPipes(
+    nodeId
+) {
+
+    return pipes.filter(
+        pipe =>
+            String(
+                pipe.to
+            ) ===
+            String(nodeId)
+    );
+}
+
+
+function getOutgoingPipes(
+    nodeId
+) {
+
+    return pipes.filter(
+        pipe =>
+            String(
+                pipe.from
+            ) ===
+            String(nodeId)
+    );
+}
+
+
+/* ================================================================
+ * 10. 節點連續方程
+ *
+ *     Σ Qin + Qlocal - Σ Qout = residual
+ * ================================================================ */
+
+function calculateNodeContinuity(
+    nodeId,
+    flowState
+) {
+
+    const node =
+        findNodeById(
+            nodeId
+        );
+
+
+    const incoming =
+        getIncomingPipes(
+            nodeId
+        );
+
+
+    const outgoing =
+        getOutgoingPipes(
+            nodeId
+        );
+
+
+    let Qin =
+        0;
+
+
+    let Qout =
+        0;
+
+
+    incoming.forEach(
+        pipe => {
+
+            const Q =
+                hydNum(
+                    flowState[
+                        pipe.id
+                    ]
+            );
+
+
+            Qin +=
+                Math.max(
+                    0,
+                    Q
                 );
         }
     );
 
 
-    /*
-     * 依拓樸順序反覆累積。
-     *
-     * V3 正式版後續可改為
-     * Topological Sort。
-     */
-
-    let changed = true;
-
-    let iteration = 0;
-
-
-    while (
-        changed &&
-        iteration < 100
-    ) {
-
-        changed = false;
-
-        iteration++;
-
-
-        pipeList.forEach(
-            pipe => {
-
-                const q =
-                    hNum(
-                        nodeFlow[
-                            pipe.from
-                        ],
-                        0
-                    );
-
-
-                if (
-                    q <= 0
-                ) {
-                    return;
-                }
-
-
-                const old =
-                    hNum(
-                        nodeFlow[
-                            pipe.to
-                        ],
-                        0
-                    );
-
-
-                /*
-                 * 注意：
-                 *
-                 * 真正管網模型必須避免
-                 * 重複累加。
-                 *
-                 * 因此此函式主要提供
-                 * 簡化案例與樹狀管網使用。
-                 */
-
-                if (
-                    pipe._flowTransferred
-                ) {
-                    return;
-                }
-
-
-                nodeFlow[
-                    pipe.to
-                ] =
-                    old + q;
-
-
-                pipe._flowTransferred =
-                    true;
-
-
-                changed = true;
-            }
-        );
-    }
-
-
-    /*
-     * 清除暫存旗標
-     */
-
-    pipeList.forEach(
+    outgoing.forEach(
         pipe => {
 
-            delete pipe._flowTransferred;
+            const Q =
+                hydNum(
+                    flowState[
+                        pipe.id
+                    ]
+                );
 
+
+            Qout +=
+                Math.max(
+                    0,
+                    Q
+                );
         }
     );
 
 
-    return nodeFlow;
+    const Qlocal =
+        getNodeExternalInflow(
+            node
+        );
+
+
+    const residual =
+        Qin +
+        Qlocal -
+        Qout;
+
+
+    return {
+
+        nodeId,
+
+        Qin,
+
+        Qout,
+
+        Qlocal,
+
+        residual,
+
+        balanced:
+            Math.abs(
+                residual
+            ) <=
+            V3_HYDRAULIC_CONFIG
+                .nodeBalanceTolerance
+    };
 }
 
 
-/* ============================================================
- * 對現有全域資料執行管網水理
- * ============================================================ */
+/* ================================================================
+ * 11. 拓樸排序
+ * ================================================================ */
 
-function calculateNetworkHydraulic() {
+function calculateNodeTopology() {
 
-    if (
-        typeof pipes === "undefined"
+    const result =
+        [];
+
+
+    const visited =
+        new Set();
+
+
+    function visit(
+        nodeId
     ) {
 
-        throw new Error(
-            "找不到 pipes 資料"
+        const id =
+            String(
+                nodeId
+            );
+
+
+        if (
+            visited.has(id)
+        ) {
+
+            return;
+        }
+
+
+        visited.add(id);
+
+
+        getOutgoingPipes(
+            nodeId
+        ).forEach(
+            pipe => {
+
+                visit(
+                    pipe.to
+                );
+            }
+        );
+
+
+        result.push(
+            nodeId
         );
     }
 
 
-    if (
-        typeof nodes === "undefined"
-    ) {
+    nodes.forEach(
+        node => {
 
-        throw new Error(
-            "找不到 nodes 資料"
-        );
-    }
+            visit(
+                node.id
+            );
+        }
+    );
 
 
     /*
-     * 優先使用管段已指定 Q。
-     *
-     * 若沒有 Q：
-     * 使用 upstream node designFlow。
+     * result 是 downstream-first。
+     * reverse 後為 upstream-first。
      */
 
-    const results = [];
+    return result.reverse();
+}
+
+
+/* ================================================================
+ * 12. 找根節點 / 入流節點
+ * ================================================================ */
+
+function findNetworkSources() {
+
+    return nodes.filter(
+        node =>
+            getIncomingPipes(
+                node.id
+            ).length === 0
+    );
+}
+
+
+function findNetworkOutfalls() {
+
+    return nodes.filter(
+        node =>
+            getOutgoingPipes(
+                node.id
+            ).length === 0
+    );
+}
+
+
+/* ================================================================
+ * 13. 初始流量分配
+ * ================================================================ */
+
+function initializeFlowState() {
+
+    const state =
+        {};
 
 
     pipes.forEach(
         pipe => {
 
             let Q =
-                hNum(
-                    pipe.Q,
-                    NaN
+                hydNum(
+                    pipe.Q ??
+                    pipe.flow ??
+                    pipe.designFlow
                 );
 
 
+            /*
+             * 若管段沒有 Q，
+             * 先設 0，後續由節點平衡調整。
+             */
+
             if (
-                !Number.isFinite(Q)
+                !hydFinite(Q)
             ) {
 
-                const from =
-                    nodes.find(
-                        n =>
-                            n.id ===
-                            pipe.from
-                    );
-
-
                 Q =
-                    from
-                        ? hNum(
-                            from.designFlow,
-                            0
-                        )
-                        : 0;
+                    0;
             }
 
 
+            state[
+                pipe.id
+            ] =
+                Q;
+        }
+    );
+
+
+    /*
+     * 依來源節點逐級分配。
+     */
+
+    const sources =
+        findNetworkSources();
+
+
+    sources.forEach(
+        source => {
+
+            const q =
+                getNodeExternalInflow(
+                    source
+                );
+
+
+            distributeFlowDownstream(
+                source.id,
+                q,
+                state
+            );
+        }
+    );
+
+
+    return state;
+}
+
+
+/* ================================================================
+ * 14. 下游流量分配
+ *
+ * 匯流系統的基本流量守恆：
+ *
+ * node Q =
+ * local inflow +
+ * incoming flow
+ *
+ * 若有多個 outgoing pipes：
+ *
+ * 依管段輸水能力比例分配。
+ * ================================================================ */
+
+function distributeFlowDownstream(
+    startNodeId,
+    initialFlow,
+    flowState
+) {
+
+    const queue =
+        [];
+
+
+    queue.push({
+
+        nodeId:
+            startNodeId,
+
+        flow:
+            initialFlow
+    });
+
+
+    const visited =
+        new Set();
+
+
+    while (
+        queue.length > 0
+    ) {
+
+        const item =
+            queue.shift();
+
+
+        const nodeId =
+            item.nodeId;
+
+
+        const availableQ =
+            Math.max(
+                0,
+                hydNum(
+                    item.flow
+                )
+            );
+
+
+        const outgoing =
+            getOutgoingPipes(
+                nodeId
+            );
+
+
+        if (
+            outgoing.length === 0
+        ) {
+
+            continue;
+        }
+
+
+        /*
+         * 若使用者已指定各管段設計流量，
+         * 優先保留。
+         */
+
+        const specified =
+            outgoing.filter(
+                pipe =>
+                    hydFinite(
+                        pipe.designFlow ??
+                        pipe.Q ??
+                        pipe.flow
+                    )
+            );
+
+
+        if (
+            specified.length ===
+            outgoing.length
+        ) {
+
+            let specifiedTotal =
+                specified.reduce(
+                    (
+                        sum,
+                        pipe
+                    ) =>
+                        sum +
+                        Math.max(
+                            0,
+                            hydNum(
+                                pipe.designFlow ??
+                                pipe.Q ??
+                                pipe.flow
+                            )
+                        ),
+                    0
+                );
+
+
+            /*
+             * 若指定流量超過可用流量，
+             * 按比例縮放。
+             */
+
+            const ratio =
+                specifiedTotal >
+                availableQ &&
+                specifiedTotal > 0
+                    ? availableQ /
+                      specifiedTotal
+                    : 1;
+
+
+            outgoing.forEach(
+                pipe => {
+
+                    const base =
+                        Math.max(
+                            0,
+                            hydNum(
+                                pipe.designFlow ??
+                                pipe.Q ??
+                                pipe.flow
+                            )
+                        );
+
+
+                    const q =
+                        base *
+                        ratio;
+
+
+                    flowState[
+                        pipe.id
+                    ] =
+                        q;
+
+
+                    queue.push({
+
+                        nodeId:
+                            pipe.to,
+
+                        flow:
+                            q
+                    });
+                }
+            );
+
+
+            continue;
+        }
+
+
+        /*
+         * 沒有完整指定時：
+         *
+         * 依目前管段滿管能力比例分配。
+         */
+
+        const capacities =
+            outgoing.map(
+                pipe => ({
+
+                    pipe,
+
+                    capacity:
+                        Math.max(
+                            fullPipeCapacity(
+                                pipe
+                            ),
+                            0.000001
+                        )
+                })
+            );
+
+
+        const capacityTotal =
+            capacities.reduce(
+                (
+                    sum,
+                    item
+                ) =>
+                    sum +
+                    item.capacity,
+                0
+            );
+
+
+        capacities.forEach(
+            item => {
+
+                const q =
+                    capacityTotal > 0
+                        ? availableQ *
+                          (
+                              item.capacity /
+                              capacityTotal
+                          )
+                        : availableQ /
+                          outgoing.length;
+
+
+                flowState[
+                    item.pipe.id
+                ] =
+                    q;
+
+
+                queue.push({
+
+                    nodeId:
+                        item.pipe.to,
+
+                    flow:
+                        q
+                });
+            }
+        );
+    }
+}
+
+
+/* ================================================================
+ * 15. 匯流節點流量
+ * ================================================================ */
+
+function calculateNodeAvailableFlow(
+    nodeId,
+    flowState
+) {
+
+    const node =
+        findNodeById(
+            nodeId
+        );
+
+
+    const incoming =
+        getIncomingPipes(
+            nodeId
+        );
+
+
+    let incomingQ =
+        0;
+
+
+    incoming.forEach(
+        pipe => {
+
+            incomingQ +=
+                Math.max(
+                    0,
+                    hydNum(
+                        flowState[
+                            pipe.id
+                        ]
+                    )
+                );
+        }
+    );
+
+
+    return (
+        incomingQ +
+        getNodeExternalInflow(
+            node
+        )
+    );
+}
+
+
+/* ================================================================
+ * 16. 重新分配匯流後流量
+ * ================================================================ */
+
+function redistributeAtNode(
+    nodeId,
+    flowState
+) {
+
+    const outgoing =
+        getOutgoingPipes(
+            nodeId
+        );
+
+
+    if (
+        outgoing.length === 0
+    ) {
+
+        return;
+    }
+
+
+    const availableQ =
+        calculateNodeAvailableFlow(
+            nodeId,
+            flowState
+        );
+
+
+    if (
+        availableQ <=
+        V3_HYDRAULIC_CONFIG.flowTolerance
+    ) {
+
+        outgoing.forEach(
+            pipe => {
+
+                flowState[
+                    pipe.id
+                ] =
+                    0;
+            }
+        );
+
+
+        return;
+    }
+
+
+    /*
+     * 若全部 outgoing 都有指定設計流量，
+     * 按指定比例。
+     */
+
+    const specified =
+        outgoing.filter(
+            pipe =>
+                hydFinite(
+                    pipe.designFlow ??
+                    pipe.Q ??
+                    pipe.flow
+                )
+        );
+
+
+    if (
+        specified.length ===
+        outgoing.length
+    ) {
+
+        let total =
+            specified.reduce(
+                (
+                    sum,
+                    pipe
+                ) =>
+                    sum +
+                    Math.max(
+                        0,
+                        hydNum(
+                            pipe.designFlow ??
+                            pipe.Q ??
+                            pipe.flow
+                        )
+                    ),
+                0
+            );
+
+
+        if (
+            total > 0
+        ) {
+
+            outgoing.forEach(
+                pipe => {
+
+                    const base =
+                        Math.max(
+                            0,
+                            hydNum(
+                                pipe.designFlow ??
+                                pipe.Q ??
+                                pipe.flow
+                            )
+                        );
+
+
+                    flowState[
+                        pipe.id
+                    ] =
+                        availableQ *
+                        base /
+                        total;
+                }
+            );
+
+
+            return;
+        }
+    }
+
+
+    /*
+     * 否則依輸水能力比例。
+     */
+
+    const capacity =
+        outgoing.map(
+            pipe => ({
+
+                pipe,
+
+                capacity:
+                    Math.max(
+                        fullPipeCapacity(
+                            pipe
+                        ),
+                        0.000001
+                    )
+            })
+        );
+
+
+    const totalCapacity =
+        capacity.reduce(
+            (
+                sum,
+                item
+            ) =>
+                sum +
+                item.capacity,
+            0
+        );
+
+
+    capacity.forEach(
+        item => {
+
+            flowState[
+                item.pipe.id
+            ] =
+                availableQ *
+                item.capacity /
+                totalCapacity;
+        }
+    );
+}
+
+
+/* ================================================================
+ * 17. 全網路節點連續方程迭代
+ * ================================================================ */
+
+function solveNetworkContinuity(
+    options = {}
+) {
+
+    if (
+        typeof nodes ===
+        "undefined" ||
+        typeof pipes ===
+        "undefined"
+    ) {
+
+        throw new Error(
+            "nodes / pipes 未建立"
+        );
+    }
+
+
+    if (
+        nodes.length === 0
+    ) {
+
+        throw new Error(
+            "nodes 為空"
+        );
+    }
+
+
+    if (
+        pipes.length === 0
+    ) {
+
+        throw new Error(
+            "pipes 為空"
+        );
+    }
+
+
+    const config = {
+
+        ...V3_HYDRAULIC_CONFIG,
+
+        ...options
+    };
+
+
+    /*
+     * ------------------------------------------------------------
+     * 1. 初始流量
+     * ------------------------------------------------------------
+     */
+
+    const flowState =
+        initializeFlowState();
+
+
+    let converged =
+        false;
+
+
+    let maxResidual =
+        Infinity;
+
+
+    let maxFlowDelta =
+        Infinity;
+
+
+    let iteration =
+        0;
+
+
+    /*
+     * ------------------------------------------------------------
+     * 2. 網路迭代
+     * ------------------------------------------------------------
+     */
+
+    for (
+        iteration = 1;
+        iteration <=
+        config.maxNetworkIterations;
+        iteration++
+    ) {
+
+        const oldState =
+            {
+                ...flowState
+            };
+
+
+        /*
+         * 按 upstream → downstream
+         * 逐節點處理。
+         */
+
+        const topology =
+            calculateNodeTopology();
+
+
+        topology.forEach(
+            nodeId => {
+
+                redistributeAtNode(
+                    nodeId,
+                    flowState
+                );
+            }
+        );
+
+
+        /*
+         * 再次由來源向下游傳遞，
+         * 確保匯流節點更新。
+         */
+
+        const sources =
+            findNetworkSources();
+
+
+        sources.forEach(
+            source => {
+
+                const q =
+                    getNodeExternalInflow(
+                        source
+                    );
+
+
+                distributeFlowDownstream(
+                    source.id,
+                    q,
+                    flowState
+                );
+            }
+        );
+
+
+        /*
+         * Relaxation
+         */
+
+        pipes.forEach(
+            pipe => {
+
+                const oldQ =
+                    hydNum(
+                        oldState[
+                            pipe.id
+                        ]
+                    );
+
+
+                const newQ =
+                    hydNum(
+                        flowState[
+                            pipe.id
+                        ]
+                    );
+
+
+                flowState[
+                    pipe.id
+                ] =
+                    oldQ *
+                    (
+                        1 -
+                        config.relaxation
+                    ) +
+                    newQ *
+                    config.relaxation;
+            }
+        );
+
+
+        /*
+         * --------------------------------------------------------
+         * 節點 residual
+         * --------------------------------------------------------
+         */
+
+        maxResidual =
+            0;
+
+
+        nodes.forEach(
+            node => {
+
+                const balance =
+                    calculateNodeContinuity(
+                        node.id,
+                        flowState
+                    );
+
+
+                maxResidual =
+                    Math.max(
+                        maxResidual,
+                        Math.abs(
+                            balance.residual
+                        )
+                    );
+            }
+        );
+
+
+        /*
+         * 最大管段流量變化
+         */
+
+        maxFlowDelta =
+            0;
+
+
+        pipes.forEach(
+            pipe => {
+
+                const oldQ =
+                    hydNum(
+                        oldState[
+                            pipe.id
+                        ]
+                    );
+
+
+                const newQ =
+                    hydNum(
+                        flowState[
+                            pipe.id
+                        ]
+                    );
+
+
+                maxFlowDelta =
+                    Math.max(
+                        maxFlowDelta,
+                        Math.abs(
+                            newQ -
+                            oldQ
+                        )
+                    );
+            }
+        );
+
+
+        if (
+            maxResidual <=
+            config.nodeBalanceTolerance &&
+            maxFlowDelta <=
+            config.flowTolerance
+        ) {
+
+            converged =
+                true;
+
+            break;
+        }
+    }
+
+
+    /*
+     * ------------------------------------------------------------
+     * 3. 建立管段成果
+     * ------------------------------------------------------------
+     */
+
+    const pipeResults =
+        [];
+
+
+    pipes.forEach(
+        pipe => {
+
+            const Q =
+                hydNum(
+                    flowState[
+                        pipe.id
+                    ]
+                );
+
+
             const result =
-                analyzePipeHydraulics(
+                calculatePipeHydraulics(
                     pipe,
                     Q
                 );
 
 
-            results.push(
+            pipeResults.push(
                 result
             );
         }
@@ -1118,109 +2247,680 @@ function calculateNetworkHydraulic() {
 
 
     /*
-     * 與前面 V3 架構相容
+     * ------------------------------------------------------------
+     * 4. 節點成果
+     * ------------------------------------------------------------
+     */
+
+    const nodeResults =
+        [];
+
+
+    nodes.forEach(
+        node => {
+
+            const balance =
+                calculateNodeContinuity(
+                    node.id,
+                    flowState
+                );
+
+
+            const incoming =
+                getIncomingPipes(
+                    node.id
+                );
+
+
+            const outgoing =
+                getOutgoingPipes(
+                    node.id
+                );
+
+
+            nodeResults.push({
+
+                nodeId:
+                    node.id,
+
+                Qin:
+                    balance.Qin,
+
+                Qout:
+                    balance.Qout,
+
+                Qlocal:
+                    balance.Qlocal,
+
+                residual:
+                    balance.residual,
+
+                balanced:
+                    balance.balanced,
+
+                incomingPipes:
+                    incoming.map(
+                        pipe =>
+                            pipe.id
+                    ),
+
+                outgoingPipes:
+                    outgoing.map(
+                        pipe =>
+                            pipe.id
+                    )
+            });
+        }
+    );
+
+
+    /*
+     * ------------------------------------------------------------
+     * 5. 系統摘要
+     * ------------------------------------------------------------
+     */
+
+    const fullPipes =
+        pipeResults.filter(
+            result =>
+                result.full
+        );
+
+
+    const surchargePipes =
+        pipeResults.filter(
+            result =>
+                result.surcharge
+        );
+
+
+    const supercriticalPipes =
+        pipeResults.filter(
+            result =>
+                result.froude > 1
+        );
+
+
+    const subcriticalPipes =
+        pipeResults.filter(
+            result =>
+                result.froude < 1 &&
+                result.froude > 0
+        );
+
+
+    const result = {
+
+        solver:
+            "V3.1 steady network continuity + Manning",
+
+        converged,
+
+        iterations:
+            iteration,
+
+        maxResidual,
+
+        maxFlowDelta,
+
+        flowState,
+
+        pipeResults,
+
+        nodeResults,
+
+        statistics: {
+
+            pipeCount:
+                pipeResults.length,
+
+            nodeCount:
+                nodeResults.length,
+
+            fullPipeCount:
+                fullPipes.length,
+
+            surchargePipeCount:
+                surchargePipes.length,
+
+            supercriticalCount:
+                supercriticalPipes.length,
+
+            subcriticalCount:
+                subcriticalPipes.length
+        },
+
+        sources:
+            findNetworkSources()
+                .map(
+                    node =>
+                        node.id
+                ),
+
+        outfalls:
+            findNetworkOutfalls()
+                .map(
+                    node =>
+                        node.id
+                )
+    };
+
+
+    /*
+     * ------------------------------------------------------------
+     * 6. 全域供 V3 使用
+     * ------------------------------------------------------------
+     */
+
+    window.v3HydraulicSolution =
+        result;
+
+
+    /*
+     * 與舊版 hydraulicResults 相容
      */
 
     window.hydraulicResults =
-        results;
+        pipeResults;
 
 
-    return results;
+    return result;
 }
 
 
-/* ============================================================
- * 計算單一管段滿管能力
- * ============================================================ */
+/* ================================================================
+ * 18. 以設計流量執行單管分析
+ * ================================================================ */
 
-function getPipeCapacity(
+function runSinglePipeHydraulic(
     pipe
 ) {
 
-    return fullPipeCapacity(
-        hNum(pipe.diameter),
-        hNum(pipe.slope),
-        hNum(
-            pipe.n,
-            0.013
-        )
+    const Q =
+        hydNum(
+            pipe.designFlow ??
+            pipe.Q ??
+            pipe.flow
+        );
+
+
+    return calculatePipeHydraulics(
+        pipe,
+        Q
     );
 }
 
 
-/* ============================================================
- * V3 檢核
- * ============================================================ */
+/* ================================================================
+ * 19. 取得完整水理成果
+ * ================================================================ */
 
-function checkHydraulicResults(
-    results
+function getHydraulicResults() {
+
+    if (
+        window.v3HydraulicSolution
+    ) {
+
+        return (
+            window
+                .v3HydraulicSolution
+                .pipeResults
+        );
+    }
+
+
+    if (
+        window.hydraulicResults
+    ) {
+
+        return window.hydraulicResults;
+    }
+
+
+    return [];
+}
+
+
+/* ================================================================
+ * 20. 供 hgl-egl.js 使用的 API
+ * ================================================================ */
+
+function getHydraulicResultForPipe(
+    pipeId
 ) {
 
-    return results.map(
-        r => {
-
-            const warnings = [];
+    const results =
+        getHydraulicResults();
 
 
-            if (
-                r.fullFlowRequired
-            ) {
-
-                warnings.push(
-                    "設計流量超過 Manning 滿管能力，需進入滿管/壓力流分析。"
-                );
-            }
-
-
-            if (
-                r.capacityRatio >=
-                0.9
-            ) {
-
-                warnings.push(
-                    "管段容量使用率達 90% 以上。"
-                );
-            }
-
-
-            if (
-                r.velocity < 0.6
-            ) {
-
-                warnings.push(
-                    "流速低於目前工程檢核門檻，請依採用設計準則確認。"
-                );
-            }
-
-
-            if (
-                r.velocity > 3.0
-            ) {
-
-                warnings.push(
-                    "流速偏高，請依採用設計準則確認。"
-                );
-            }
-
-
-            return {
-
-                pipeId:
-                    r.pipeId,
-
-                capacityRatio:
-                    r.capacityRatio,
-
-                velocity:
-                    r.velocity,
-
-                status:
-                    warnings.length
-                        ? "CHECK"
-                        : "OK",
-
-                warnings
-            };
-        }
+    return (
+        results.find(
+            result =>
+                String(
+                    result.pipeId
+                ) ===
+                String(pipeId)
+        ) ||
+        null
     );
 }
+
+
+/* ================================================================
+ * 21. 重新由 HGL 水位計算流量
+ *
+ * 這是 V3.1 → HGL/EGL 的重要介面。
+ *
+ * headSlope =
+ *
+ *     (Hup - Hdown) / L
+ *
+ * 若水頭坡度 > 0：
+ *     使用 Manning 求 Q
+ *
+ * 若 Hup <= Hdown：
+ *     標記為 backwater / pressure condition
+ *
+ * 此函式不直接處理完整 Saint-Venant。
+ * ================================================================ */
+
+function calculateFlowFromHydraulicHead(
+    pipe,
+    Hup,
+    Hdown
+) {
+
+    const L =
+        getPipeLength(
+            pipe
+        );
+
+
+    const D =
+        getPipeDiameter(
+            pipe
+        );
+
+
+    const n =
+        getPipeManningN(
+            pipe
+        );
+
+
+    if (
+        L <= 0 ||
+        D <= 0
+    ) {
+
+        return {
+
+            Q:
+                0,
+
+            hydraulicSlope:
+                0,
+
+            regime:
+                "invalid"
+        };
+    }
+
+
+    const hydraulicSlope =
+        (
+            hydNum(Hup) -
+            hydNum(Hdown)
+        ) /
+        L;
+
+
+    /*
+     * 正水頭坡度：
+     * Manning。
+     */
+
+    if (
+        hydraulicSlope >
+        V3_HYDRAULIC_CONFIG.minimumSlope
+    ) {
+
+        const A =
+            circularArea(
+                D
+            );
+
+
+        const R =
+            D / 4;
+
+
+        const Qfull =
+            manningQ(
+                A,
+                R,
+                hydraulicSlope,
+                n
+            );
+
+
+        return {
+
+            Q:
+                Qfull,
+
+            hydraulicSlope,
+
+            regime:
+                "full-manning",
+
+            full:
+                true
+        };
+    }
+
+
+    /*
+     * 水頭坡度 <= 0
+     *
+     * 代表回水 / 壓力 / 邊界控制，
+     * 不用單純正常流公式硬算。
+     */
+
+    return {
+
+        Q:
+            0,
+
+        hydraulicSlope,
+
+        regime:
+            "backwater",
+
+        full:
+            false
+    };
+}
+
+
+/* ================================================================
+ * 22. HGL 迭代介面
+ *
+ * hgl-egl.js 可使用這個函式。
+ *
+ * 輸入：
+ *
+ *   pipe
+ *   Hup
+ *   Hdown
+ *
+ * 回傳：
+ *
+ *   Q
+ *   depth
+ *   velocity
+ *   regime
+ * ================================================================ */
+
+function hydraulicStateFromHGL(
+    pipe,
+    Hup,
+    Hdown
+) {
+
+    const hydraulic =
+        getHydraulicResultForPipe(
+            pipe.id
+        );
+
+
+    /*
+     * 若 network solver 已經算過，
+     * 優先使用 network result。
+     */
+
+    if (
+        hydraulic
+    ) {
+
+        return {
+
+            ...hydraulic,
+
+            Hup:
+                Hup,
+
+            Hdown:
+                Hdown
+        };
+    }
+
+
+    /*
+     * 否則由水頭差估算。
+     */
+
+    const flow =
+        calculateFlowFromHydraulicHead(
+            pipe,
+            Hup,
+            Hdown
+        );
+
+
+    return {
+
+        pipeId:
+            pipe.id,
+
+        Q:
+            flow.Q,
+
+        Hup,
+
+        Hdown,
+
+        regime:
+            flow.regime
+    };
+}
+
+
+/* ================================================================
+ * 23. Manning 計算工具輸出
+ * ================================================================ */
+
+function getManningCapacity(
+    pipe
+) {
+
+    return {
+
+        Qfull:
+            fullPipeCapacity(
+                pipe
+            ),
+
+        diameter:
+            getPipeDiameter(
+                pipe
+            ),
+
+        slope:
+            getPipeSlope(
+                pipe
+            ),
+
+        n:
+            getPipeManningN(
+                pipe
+            )
+    };
+}
+
+
+/* ================================================================
+ * 24. 系統檢核摘要
+ * ================================================================ */
+
+function hydraulicSummary(
+    solution
+) {
+
+    if (!solution) {
+
+        return null;
+    }
+
+
+    const pipeResults =
+        solution.pipeResults ||
+        [];
+
+
+    const nodeResults =
+        solution.nodeResults ||
+        [];
+
+
+    const maxVelocity =
+        pipeResults.length > 0
+            ? Math.max(
+                ...pipeResults.map(
+                    result =>
+                        Math.abs(
+                            hydNum(
+                                result.velocity
+                            )
+                        )
+                )
+            )
+            : 0;
+
+
+    const minVelocity =
+        pipeResults.length > 0
+            ? Math.min(
+                ...pipeResults.map(
+                    result =>
+                        Math.abs(
+                            hydNum(
+                                result.velocity
+                            )
+                        )
+                )
+            )
+            : 0;
+
+
+    const maxFroude =
+        pipeResults.length > 0
+            ? Math.max(
+                ...pipeResults.map(
+                    result =>
+                        hydNum(
+                            result.froude
+                        )
+                )
+            )
+            : 0;
+
+
+    return {
+
+        converged:
+            solution.converged,
+
+        iterations:
+            solution.iterations,
+
+        maxResidual:
+            solution.maxResidual,
+
+        maxFlowDelta:
+            solution.maxFlowDelta,
+
+        maxVelocity,
+
+        minVelocity,
+
+        maxFroude,
+
+        fullPipeCount:
+            solution.statistics
+                ?.fullPipeCount || 0,
+
+        surchargePipeCount:
+            solution.statistics
+                ?.surchargePipeCount || 0,
+
+        unbalancedNodeCount:
+            nodeResults.filter(
+                node =>
+                    !node.balanced
+            ).length
+    };
+}
+
+
+/* ================================================================
+ * 25. 匯出至全域
+ * ================================================================ */
+
+window.V3Hydraulic = {
+
+    solveNetwork:
+        solveNetworkContinuity,
+
+    solveNormalDepth,
+
+    calculatePipe:
+        calculatePipeHydraulics,
+
+    calculateNodeContinuity,
+
+    calculateFlowFromHydraulicHead,
+
+    hydraulicStateFromHGL,
+
+    getHydraulicResultForPipe,
+
+    getResults:
+        getHydraulicResults,
+
+    getManningCapacity,
+
+    fullPipeCapacity,
+
+    circularGeometry,
+
+    manningQ,
+
+    manningVelocity,
+
+    calculateFroude,
+
+    summary:
+        hydraulicSummary
+};
+
+
+/* ================================================================
+ * 26. 相容舊版 API
+ * ================================================================ */
+
+window.solveHydraulicNetwork =
+    solveNetworkContinuity;
+
+
+window.runHydraulicAnalysis =
+    solveNetworkContinuity;
+
+
+window.calculateHydraulic =
+    calculatePipeHydraulics;
+
+
+/* ================================================================
+ * END hydraulic.js
+ * ================================================================ */
