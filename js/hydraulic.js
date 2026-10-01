@@ -1291,6 +1291,21 @@ function calculateNodeContinuity(
             node
         );
 
+    /*
+     * [FIX] 出口節點（無 outgoing pipe）：
+     * 水流離開系統，Qout 視為 Qin + Qlocal，
+     * 否則出口節點永遠被判定為不平衡。
+     */
+    if (
+        outgoing.length === 0
+    ) {
+
+        Qout =
+            Qin +
+            Math.max(0, Qlocal);
+    }
+
+
 
     const residual =
         Qin +
@@ -1461,33 +1476,114 @@ function initializeFlowState() {
     );
 
 
-    /*
-     * 依來源節點逐級分配。
-     */
+    /* [FIX] 依拓樸順序累加，保留中間節點外部入流 */
 
-    const sources =
-        findNetworkSources();
-
-
-    sources.forEach(
-        source => {
-
-            const q =
-                getNodeExternalInflow(
-                    source
-                );
-
-
-            distributeFlowDownstream(
-                source.id,
-                q,
-                state
-            );
-        }
+    accumulateFlowTopological(
+        state
     );
 
 
     return state;
+}
+
+
+
+/* ================================================================
+ * 13b. [FIX] 依拓樸順序累加流量
+ *
+ * 節點可用流量 = 節點外部入流 + 所有上游管段流量，
+ * 再依管段輸水能力（或指定流量）分配到下游管段。
+ * 舊版只從來源節點分配，中間節點的外部入流會被覆蓋。
+ * ================================================================ */
+
+function accumulateFlowTopological(flowState) {
+
+    const indegree = {};
+
+    nodes.forEach(node => {
+        indegree[node.id] = getIncomingPipes(node.id).length;
+    });
+
+    const queue = nodes
+        .filter(node => indegree[node.id] === 0)
+        .map(node => node.id);
+
+    const order = [];
+    const seen = new Set();
+
+    while (queue.length > 0) {
+
+        const id = queue.shift();
+
+        if (seen.has(id)) { continue; }
+
+        seen.add(id);
+        order.push(id);
+
+        getOutgoingPipes(id).forEach(pipe => {
+            indegree[pipe.to]--;
+            if (indegree[pipe.to] <= 0) { queue.push(pipe.to); }
+        });
+    }
+
+    /* 迴圈（非 DAG）剩餘節點也處理，避免漏算 */
+    nodes.forEach(node => {
+        if (!seen.has(node.id)) { order.push(node.id); }
+    });
+
+    const specifiedQ = pipe =>
+        pipe.designFlow ?? pipe.Q ?? pipe.flow;
+
+    order.forEach(nodeId => {
+
+        const node = findNodeById(nodeId);
+
+        let available = Math.max(0, getNodeExternalInflow(node));
+
+        getIncomingPipes(nodeId).forEach(pipe => {
+            available += Math.max(0, hydNum(flowState[pipe.id]));
+        });
+
+        const outgoing = getOutgoingPipes(nodeId);
+
+        if (outgoing.length === 0) { return; }
+
+        const specified = outgoing.filter(pipe =>
+            hydFinite(specifiedQ(pipe)) && hydNum(specifiedQ(pipe)) > 0
+        );
+
+        if (specified.length === outgoing.length) {
+
+            const total = specified.reduce(
+                (s, p) => s + hydNum(specifiedQ(p)), 0
+            );
+
+            const ratio =
+                total > available && total > 0 ? available / total : 1;
+
+            outgoing.forEach(pipe => {
+                flowState[pipe.id] = hydNum(specifiedQ(pipe)) * ratio;
+            });
+
+            return;
+        }
+
+        const capacities = outgoing.map(pipe => ({
+            pipe,
+            capacity: Math.max(fullPipeCapacity(pipe), 0.000001)
+        }));
+
+        const capacityTotal = capacities.reduce((s, c) => s + c.capacity, 0);
+
+        capacities.forEach(c => {
+            flowState[c.pipe.id] =
+                capacityTotal > 0
+                    ? available * c.capacity / capacityTotal
+                    : available / outgoing.length;
+        });
+    });
+
+    return flowState;
 }
 
 
@@ -2047,45 +2143,10 @@ function solveNetworkContinuity(
          * 逐節點處理。
          */
 
-        const topology =
-            calculateNodeTopology();
+        /* [FIX] 穩態網路：依拓樸順序一次累加即為精確解 */
 
-
-        topology.forEach(
-            nodeId => {
-
-                redistributeAtNode(
-                    nodeId,
-                    flowState
-                );
-            }
-        );
-
-
-        /*
-         * 再次由來源向下游傳遞，
-         * 確保匯流節點更新。
-         */
-
-        const sources =
-            findNetworkSources();
-
-
-        sources.forEach(
-            source => {
-
-                const q =
-                    getNodeExternalInflow(
-                        source
-                    );
-
-
-                distributeFlowDownstream(
-                    source.id,
-                    q,
-                    flowState
-                );
-            }
+        accumulateFlowTopological(
+            flowState
         );
 
 
